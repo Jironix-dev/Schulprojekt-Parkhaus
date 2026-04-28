@@ -66,8 +66,9 @@ def main() -> None:
     try:
         while True:
             frame = picam2.capture_array()
-            add_overlay(frame, f"Bild {next_index:04d} | ENTER=Speichern | ESC=Beenden")
-            cv2.imshow(window_name, frame)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            add_overlay(rgb_frame, f"Bild {next_index:04d} | ENTER=Speichern | ESC=Beenden")
+            cv2.imshow(window_name, rgb_frame)
 
             key = cv2.waitKey(10) & 0xFF
             if key == 27:  # ESC
@@ -75,7 +76,7 @@ def main() -> None:
                 break
             if key in (13, 10):  # ENTER
                 image_path = build_image_path(image_dir, next_index)
-                saved = cv2.imwrite(str(image_path), frame)
+                saved = cv2.imwrite(str(image_path), rgb_frame)
                 if saved:
                     print(f"Bild gespeichert: {image_path}")
                     next_index += 1
