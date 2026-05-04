@@ -1,0 +1,49 @@
+parkhaus-projekt/
+│
+├── ai/                      # YOLO + OCR
+│   ├── model/               # trainiertes YOLO Modell
+│   ├── inference.py        # Kennzeichen erkennen
+│   ├── ocr.py              # Text auslesen
+│   └── utils.py
+│
+├── backend/                # Hauptlogik
+│   ├── database/
+│   │   ├── db.py           # SQLite Verbindung
+│   │   ├── models.py       # Tabellenstruktur
+│   │   └── queries.py      # SQL Funktionen
+│   │
+│   ├── services/
+│   │   ├── parking.py      # Ein-/Ausfahrt Logik
+│   │   ├── payment.py      # Kostenberechnung
+│   │   └── vehicle.py      # Fahrzeugverwaltung
+│   │
+│   └── main.py             # zentrale Steuerung
+│
+├── mqtt/                   # Kommunikation
+│   ├── client.py           # MQTT Client (Pi)
+│   ├── topics.py           # alle Topics definiert
+│   └── handler.py          # Nachrichten verarbeiten
+│
+├── hardware/               # ESP32 Code (separat flashen)
+│   ├── esp32/
+│   │   ├── main.ino
+│   │   └── mqtt_handler.ino
+│
+├── dashboard/              # Webinterface
+│   ├── app.py              # Flask / FastAPI Backend
+│   ├── templates/
+│   ├── static/
+│   └── routes.py
+│
+├── config/
+│   └── settings.py         # zentrale Konfiguration
+│
+├── data/
+│   ├── images/             # gespeicherte Bilder
+│   ├── plates/             # ausgeschnittene Kennzeichen
+│   └── logs/
+│
+├── tests/
+│
+├── requirements.txt
+└── README.md
