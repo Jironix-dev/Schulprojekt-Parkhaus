@@ -49,6 +49,16 @@ def add_overlay(frame, text: str) -> None:
     )
 
 
+def trigger_autofocus(picam2: Picamera2) -> None:
+    """Triggert den Autofokus der Kamera neu."""
+    try:
+        # AfMode 2 = Single-shot Autofokus, AfTrigger 1 = Trigger auslösen
+        picam2.set_controls({"AfMode": 2, "AfTrigger": 1})
+        print("Autofokus wurde getriggert...")
+    except Exception as e:
+        print(f"Fehler beim Aktivieren des Autofokus: {e}")
+
+
 def main() -> None:
     image_dir = ensure_image_folder()
     next_index = get_next_image_index(image_dir)
@@ -58,16 +68,19 @@ def main() -> None:
         main={"size": (IMAGE_WIDTH, IMAGE_HEIGHT)}
     )
     picam2.configure(camera_config)
+    
+    # Autofokus vor dem Start aktivieren
+    picam2.set_controls({"AfMode": 2})  # 2 = Continuous autofocus
     picam2.start()
 
-    window_name = "Live Feed - Drücke ENTER zum Speichern, ESC zum Beenden"
+    window_name = "Live Feed - Drücke ENTER zum Speichern, F für Autofokus, ESC zum Beenden"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
     try:
         while True:
             frame = picam2.capture_array()
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            add_overlay(rgb_frame, f"Bild {next_index:04d} | ENTER=Speichern | ESC=Beenden")
+            add_overlay(rgb_frame, f"Bild {next_index:04d} | ENTER=Speichern | F=Autofokus | ESC=Beenden")
             cv2.imshow(window_name, rgb_frame)
 
             key = cv2.waitKey(10) & 0xFF
@@ -82,6 +95,8 @@ def main() -> None:
                     next_index += 1
                 else:
                     print(f"Fehler beim Speichern von {image_path}")
+            if key == ord("f") or key == ord("F"):  # F-Taste für Autofokus
+                trigger_autofocus(picam2)
     finally:
         picam2.close()
         cv2.destroyAllWindows()
