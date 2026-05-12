@@ -296,3 +296,34 @@ class DashboardService:
             }
             for v in vehicles
         ]
+    
+    @staticmethod
+    def get_known_vehicles() -> list:
+        """Ruft alle bekannten Fahrzeuge aus der Datenbank ab"""
+        cursor = db.get_cursor()
+        cursor.execute("""
+            SELECT 
+                v.id,
+                v.license_plate,
+                v.status,
+                v.first_seen_at,
+                v.last_seen_at,
+                COUNT(ps.id) as total_sessions
+            FROM vehicles v
+            LEFT JOIN parking_sessions ps ON v.id = ps.vehicle_id
+            GROUP BY v.id
+            ORDER BY v.last_seen_at DESC NULLS LAST
+        """)
+        
+        results = cursor.fetchall()
+        return [
+            {
+                'vehicle_id': row[0],
+                'license_plate': row[1],
+                'status': row[2],
+                'first_seen_at': row[3],
+                'last_seen_at': row[4],
+                'total_sessions': row[5]
+            }
+            for row in results
+        ]

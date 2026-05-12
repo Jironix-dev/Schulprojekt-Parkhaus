@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 import time
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.database.db import db
 from backend.services.dashboard_service import DashboardService
+from livefeed import generate_stream, get_static_frame, live_feed
 
 router = APIRouter()
 # Pfad zum templates-Verzeichnis
@@ -142,3 +143,56 @@ def get_status_widget():
         }
     except Exception as e:
         return {"error": str(e), "vehicles": []}
+
+
+@router.get("/api/widget/known-vehicles")
+def get_known_vehicles_widget():
+    """Widget: Alle bekannten Kennzeichen"""
+    try:
+        vehicles = DashboardService.get_known_vehicles()
+        return {
+            "title": "Bekannte Kennzeichen",
+            "vehicles": [
+                {
+                    'license_plate': v['license_plate'],
+                    'status': v['status'],
+                    'first_seen_at': v['first_seen_at'],
+                    'last_seen_at': v['last_seen_at'],
+                    'total_sessions': v['total_sessions']
+                }
+                for v in vehicles
+            ],
+            "count": len(vehicles)
+        }
+    except Exception as e:
+        return {"error": str(e), "vehicles": []}
+
+
+# ==================== Live-Feed Endpoints ====================
+
+@router.get("/api/stream")
+def video_stream():
+    """Motion JPEG Stream für Live-Feed"""
+    return StreamingResponse(
+        generate_stream(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+
+@router.get("/api/camera/frame")
+def get_camera_frame():
+    """Statischer Frame vom Live-Feed"""
+    frame = get_static_frame()
+    return StreamingResponse(
+        iter([frame]),
+        media_type="image/jpeg"
+    )
+
+
+@router.get("/api/camera/status")
+def get_camera_status():
+    """Gibt Status der Kamera zurück"""
+    return {
+        "active": live_feed.is_active(),
+        "status": "aktiv" if live_feed.is_active() else "inaktiv"
+    }

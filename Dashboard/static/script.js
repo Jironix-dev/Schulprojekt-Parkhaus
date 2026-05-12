@@ -15,6 +15,15 @@ function updateTime() {
     document.getElementById("current-date").innerText = `${day}.${month}.${year}`;
 }
 
+// Aktualisiere Live-Feed
+function updateLiveFeed() {
+    const feedImg = document.getElementById("live-feed-img");
+    if (feedImg) {
+        // Ändere src mit Timestamp um Cache zu umgehen
+        feedImg.src = "/api/camera/frame?t=" + Date.now();
+    }
+}
+
 // Modal-Funktionen
 function openModal(modalType) {
     const modalId = `modal-${modalType}`;
@@ -63,6 +72,10 @@ async function loadModalData(modalType) {
         case 'status':
             endpoint = '/api/widget/status';
             listId = 'status-list';
+            break;
+        case 'known-vehicles':
+            endpoint = '/api/widget/known-vehicles';
+            listId = 'known-vehicles-list';
             break;
         case 'stats':
             loadStatsModal();
@@ -166,6 +179,29 @@ function displayModalData(modalType, data, listId) {
             });
             container.innerHTML = html;
             break;
+            
+        case 'known-vehicles':
+            data.vehicles.forEach(v => {
+                const lastSeen = v.last_seen_at ? new Date(v.last_seen_at).toLocaleString('de-DE') : 'Unbekannt';
+                const firstSeen = v.first_seen_at ? new Date(v.first_seen_at).toLocaleString('de-DE') : 'Unbekannt';
+                html += `
+                    <div class="data-item">
+                        <div class="data-item-main">
+                            <span class="data-item-plate">${v.license_plate}</span>
+                            <span class="data-item-secondary">Status: ${v.status}</span>
+                            <span class="data-item-secondary" style="font-size: 0.8em;">Zuletzt: ${lastSeen}</span>
+                        </div>
+                        <div style="text-align: right;">
+                            <span class="data-item-value">${v.total_sessions}</span>
+                            <span class="data-item-secondary">Sessions</span>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+            document.getElementById('known-vehicles-count').innerText = data.count;
+            break;
+            break;
     }
 }
 
@@ -207,10 +243,6 @@ function update() {
         document.getElementById("exits-today").innerText = data.today_stats.exits_today;
         document.getElementById("revenue-today").innerText = parseFloat(data.today_stats.revenue_today).toFixed(2) + "€";
         
-        // Ausstehende Zahlungen aktualisieren
-        document.getElementById("pending-count").innerText = data.pending_payments.pending_count;
-        document.getElementById("pending-amount").innerText = parseFloat(data.pending_payments.total_amount_pending).toFixed(2) + " €";
-        
         // Letzte Aktualisierung
         document.getElementById("last-update").innerText = new Date().toLocaleString('de-DE');
     })
@@ -234,9 +266,13 @@ function pay() {
 // Initial updates
 updateTime();
 update();
+updateLiveFeed();
 
 // Update Zeit jede Sekunde
 setInterval(updateTime, 1000);
 
 // Update Dashboard-Daten alle 2 Sekunden
 setInterval(update, 2000);
+
+// Update Live-Feed alle 0,5 Sekunden (~2 FPS)
+setInterval(updateLiveFeed, 500);

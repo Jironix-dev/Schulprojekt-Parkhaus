@@ -26,24 +26,6 @@ def initialize_database():
         # Tabellen erstellen
         db.initialize()
         
-        # Beispieldaten hinzufügen (optional)
-        print("\n" + "=" * 60)
-        print("Füge Beispieldaten hinzu...")
-        print("=" * 60)
-        
-        # Fahrzeuge
-        vehicle1_id = VehicleQueries.add_vehicle('A 1234', 'Testwagen 1')
-        vehicle2_id = VehicleQueries.add_vehicle('B 5678', 'Testwagen 2')
-        
-        if vehicle1_id:
-            print(f"[OK] Fahrzeug 1 hinzugefuegt (ID: {vehicle1_id})")
-        if vehicle2_id:
-            print(f"[OK] Fahrzeug 2 hinzugefuegt (ID: {vehicle2_id})")
-        
-        # Fahrzeug 1 freigeben
-        VehicleQueries.approve_vehicle(vehicle1_id)
-        print(f"[OK] Fahrzeug 1 freigegeben")
-        
         # Systemevent
         SystemQueries.log_event('INIT', 'Datenbank initialisiert', None)
         print("[OK] Systemevent protokolliert")

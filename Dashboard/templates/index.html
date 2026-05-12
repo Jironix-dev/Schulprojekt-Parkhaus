@@ -17,115 +17,110 @@
         </div>
     </div>
     
-    <!-- Kapazität Anzeige -->
-    <div class="card capacity-card">
-        <h3>📊 Parkplatz-Auslastung</h3>
-        <div class="capacity-grid">
-            <div class="capacity-stat">
-                <div class="stat-value" id="total-spaces">{{ data.parking_capacity.total_spaces }}</div>
-                <div class="stat-label">Gesamtplätze</div>
-            </div>
-            <div class="capacity-stat">
-                <div class="stat-value occupied" id="occupied-spaces">{{ data.parking_capacity.occupied_spaces }}</div>
-                <div class="stat-label">Besetzt</div>
-            </div>
-            <div class="capacity-stat">
-                <div class="stat-value available" id="available-spaces">{{ data.parking_capacity.available_spaces }}</div>
-                <div class="stat-label">Frei</div>
-            </div>
-            <div class="capacity-stat">
-                <div class="stat-value rate" id="occupancy-rate">{{ data.parking_capacity.occupancy_rate }}%</div>
-                <div class="stat-label">Auslastung</div>
+    <div class="dashboard-layout">
+        <!-- Live-Feed (Links) -->
+        <div class="feed-section">
+            <div class="card camera-feed">
+                <h3>📹 Live-Feed</h3>
+                <img id="live-feed-img" src="/api/camera/frame" alt="Kamera-Feed">
             </div>
         </div>
-    </div>
+        
+        <!-- Widgets (Rechts) -->
+        <div class="widgets-section">
+            <!-- Kapazität Anzeige -->
+            <div class="card capacity-card">
+                <h3>📊 Parkplatz-Auslastung</h3>
+                <div class="capacity-grid">
+                    <div class="capacity-stat">
+                        <div class="stat-value" id="total-spaces">{{ data.parking_capacity.total_spaces }}</div>
+                        <div class="stat-label">Gesamtplätze</div>
+                    </div>
+                    <div class="capacity-stat">
+                        <div class="stat-value occupied" id="occupied-spaces">{{ data.parking_capacity.occupied_spaces }}</div>
+                        <div class="stat-label">Besetzt</div>
+                    </div>
+                    <div class="capacity-stat">
+                        <div class="stat-value available" id="available-spaces">{{ data.parking_capacity.available_spaces }}</div>
+                        <div class="stat-label">Frei</div>
+                    </div>
+                    <div class="capacity-stat">
+                        <div class="stat-value rate" id="occupancy-rate">{{ data.parking_capacity.occupancy_rate }}%</div>
+                        <div class="stat-label">Auslastung</div>
+                    </div>
+                </div>
+            </div>
 
-    <!-- Aktive Session -->
-    <div class="card active-session-card">
-        <h3>🚙 Aktuelle Session</h3>
-        {% if data.active_session %}
-            <div class="session-info">
-                <div class="info-row">
-                    <span class="label">Kennzeichen:</span>
-                    <span class="value" id="plate">{{ data.active_session.license_plate }}</span>
+            <!-- Aktive Session -->
+            <div class="card active-session-card">
+                <h3>🚙 Aktuelle Session</h3>
+                {% if data.active_session %}
+                    <div class="session-info">
+                        <div class="info-row">
+                            <span class="label">Kennzeichen:</span>
+                            <span class="value" id="plate">{{ data.active_session.license_plate }}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Parkdauer:</span>
+                            <span class="value" id="duration">{{ data.active_session.parking_duration_minutes }} Min</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Eintritt:</span>
+                            <span class="value" id="entry-time">{{ data.active_session.entry_time[:16] }}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Confidence:</span>
+                            <span class="value" id="confidence">{% if data.active_session.confidence_score %}{{ (data.active_session.confidence_score * 100)|round(1) }}%{% else %}N/A{% endif %}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Kosten:</span>
+                            <span class="value highlight" id="cost">{{ "%.2f"|format(data.active_session.cost_calculated) }} €</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Status:</span>
+                            <span class="value status-{{ data.active_session.status }}" id="status">{{ data.active_session.status }}</span>
+                        </div>
+                    </div>
+                    {% if not data.active_session.payment_confirmed %}
+                    <button class="btn btn-payment" onclick="pay()">Bezahlung bestätigen</button>
+                    {% else %}
+                    <div class="payment-confirmed">✓ Zahlung bestätigt</div>
+                    {% endif %}
+                {% else %}
+                <div class="no-session">
+                    <p>Keine aktive Session</p>
                 </div>
-                <div class="info-row">
-                    <span class="label">Parkdauer:</span>
-                    <span class="value" id="duration">{{ data.active_session.parking_duration_minutes }} Min</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Eintritt:</span>
-                    <span class="value" id="entry-time">{{ data.active_session.entry_time[:16] }}</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Confidence:</span>
-                    <span class="value" id="confidence">{% if data.active_session.confidence_score %}{{ (data.active_session.confidence_score * 100)|round(1) }}%{% else %}N/A{% endif %}</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Kosten:</span>
-                    <span class="value highlight" id="cost">{{ "%.2f"|format(data.active_session.cost_calculated) }} €</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Status:</span>
-                    <span class="value status-{{ data.active_session.status }}" id="status">{{ data.active_session.status }}</span>
-                </div>
+                {% endif %}
             </div>
-            {% if not data.active_session.payment_confirmed %}
-            <button class="btn btn-payment" onclick="pay()">Bezahlung bestätigen</button>
-            {% else %}
-            <div class="payment-confirmed">✓ Zahlung bestätigt</div>
-            {% endif %}
-        {% else %}
-        <div class="no-session">
-            <p>Keine aktive Session</p>
-        </div>
-        {% endif %}
-    </div>
 
-    <!-- Heutige Statistiken -->
-    <div class="card stats-card clickable" onclick="openModal('stats')">
-        <h3>📈 Heute</h3>
-        <div class="stats-grid">
-            <div class="stat-box">
-                <div class="stat-number" id="entries-today">{{ data.today_stats.entries_today }}</div>
-                <div class="stat-description">Einfahrten</div>
+            <!-- Heutige Statistiken -->
+            <div class="card stats-card clickable" onclick="openModal('stats')">
+                <h3>📈 Heute</h3>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-number" id="entries-today">{{ data.today_stats.entries_today }}</div>
+                        <div class="stat-description">Einfahrten</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-number" id="exits-today">{{ data.today_stats.exits_today }}</div>
+                        <div class="stat-description">Ausfahrten</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-number highlight" id="revenue-today">{{ "%.2f"|format(data.today_stats.revenue_today) }}€</div>
+                        <div class="stat-description">Einnahmen</div>
+                    </div>
+                </div>
             </div>
-            <div class="stat-box">
-                <div class="stat-number" id="exits-today">{{ data.today_stats.exits_today }}</div>
-                <div class="stat-description">Ausfahrten</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-number highlight" id="revenue-today">{{ "%.2f"|format(data.today_stats.revenue_today) }}€</div>
-                <div class="stat-description">Einnahmen</div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Ausstehende Zahlungen -->
-    <div class="card pending-card clickable" onclick="openModal('costs')">
-        <h3>💰 Ausstehende Zahlungen</h3>
-        <div class="pending-info">
-            <div class="pending-count">
-                <span class="number" id="pending-count">{{ data.pending_payments.pending_count }}</span>
-                <span class="text">Fahrzeuge</span>
+            <!-- Ausstehende Zahlungen & Bekannte Kennzeichen (nebeneinander) -->
+            <div class="bottom-widgets-row">
+                <div class="card pending-card clickable" onclick="openModal('costs')">
+                    <h3>💰 Ausstehende Zahlungen</h3>
+                </div>
+                <div class="card recent-vehicles-card clickable" onclick="openModal('known-vehicles')">
+                    <h3>🚗 Bekannte Kennzeichen</h3>
+                </div>
             </div>
-            <div class="pending-amount">
-                <span class="amount highlight" id="pending-amount">{{ "%.2f"|format(data.pending_payments.total_amount_pending) }} €</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Zuletzt erkannte Fahrzeuge -->
-    <div class="card recent-vehicles-card clickable" onclick="openModal('plate-recognition')">
-        <h3>🚗 Zuletzt erkannt</h3>
-        <div class="vehicles-list">
-            {% for vehicle in data.recent_vehicles[:5] %}
-            <div class="vehicle-item">
-                <span class="plate">{{ vehicle.license_plate }}</span>
-                <span class="status status-{{ vehicle.status }}">{{ vehicle.status }}</span>
-                <span class="sessions">{{ vehicle.total_sessions }} Sessions</span>
-            </div>
-            {% endfor %}
         </div>
     </div>
 
@@ -202,6 +197,24 @@
         <div class="modal-body">
             <div id="status-list" class="data-list">
                 <p class="loading">Laden...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Bekannte Kennzeichen -->
+<div id="modal-known-vehicles" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>🚗 Bekannte Kennzeichen</h2>
+            <button class="modal-close" onclick="closeModal('known-vehicles')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="known-vehicles-list" class="data-list">
+                <p class="loading">Laden...</p>
+            </div>
+            <div class="modal-summary">
+                <strong>Gesamt Fahrzeuge:</strong> <span id="known-vehicles-count">0</span>
             </div>
         </div>
     </div>
