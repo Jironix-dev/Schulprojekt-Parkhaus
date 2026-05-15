@@ -1,8 +1,16 @@
 import re
+import sys
 from pathlib import Path
 
 import cv2
-from picamera2 import Picamera2
+
+# Try to import picamera2 (only available on Raspberry Pi)
+try:
+    from picamera2 import Picamera2
+    PICAMERA2_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    PICAMERA2_AVAILABLE = False
+    # Note: Falls picamera2 nicht verfügbar ist, nutze OpenCV fallback
 
 IMAGE_DIR = Path("images")
 IMAGE_PATTERN = re.compile(r"^(\d{4})\.jpg$")
@@ -49,11 +57,15 @@ def add_overlay(frame, text: str) -> None:
     )
 
 
-def trigger_autofocus(picam2: Picamera2) -> None:
-    """Triggert den Autofokus der Kamera neu."""
+def trigger_autofocus(camera) -> None:
+    """Triggert den Autofokus der Kamera neu (nur bei Picamera2)."""
+    if not PICAMERA2_AVAILABLE:
+        print("Autofokus nur auf Raspberry Pi verfügbar")
+        return
+    
     try:
         # AfMode 2 = Single-shot Autofokus, AfTrigger 1 = Trigger auslösen
-        picam2.set_controls({"AfMode": 2, "AfTrigger": 1})
+        camera.set_controls({"AfMode": 2, "AfTrigger": 1})
         print("Autofokus wurde getriggert...")
     except Exception as e:
         print(f"Fehler beim Aktivieren des Autofokus: {e}")
@@ -63,23 +75,71 @@ def main() -> None:
     image_dir = ensure_image_folder()
     next_index = get_next_image_index(image_dir)
 
-    picam2 = Picamera2()
-    camera_config = picam2.create_preview_configuration(
-        main={"size": (IMAGE_WIDTH, IMAGE_HEIGHT)}
-    )
-    picam2.configure(camera_config)
-    
-    # Autofokus vor dem Start aktivieren
-    picam2.set_controls({"AfMode": 2})  # 2 = Continuous autofocus
-    picam2.start()
+    if PICAMERA2_AVAILABLE:
+        # Raspberry Pi mit picamera2
+        print("Nutze Picamera2 (Raspberry Pi)...")
+        picam2 = Picamera2()
+        camera_config = picam2.create_preview_configuration(
+            main={"size": (IMAGE_WIDTH, IMAGE_HEIGHT)}
+        )
+        picam2.configure(camera_config)
+        
+        # Autofokus vor dem Start aktivieren
+        picam2.set_controls({"AfMode": 2})  # 2 = Continuous autofocus
+        picam2.start()
+        camera = picam2
+    else:
+        # Fallback: USB-Kamera mit OpenCV
+        print("Nutze OpenCV mit USB-Kamera (Fallback für Linux/Windows)...")
+        
+        # Versuche verschiedene Kamera-Indizes (0, 1, 2...)
+        camera = None
+        for cam_index in range(5):
+            print(f"Versuche Kamera-Index {cam_index}...")
+            cap = cv2.VideoCapture(cam_index)
+            if cap.isOpened():
+                # Prüfe ob tatsächlich ein Frame gelesen werden kann
+                ret, _ = cap.read()
+                if ret:
+                    print(f"✓ Kamera gefunden bei Index {cam_index}")
+                    camera = cap
+                    break
+                else:
+                    print(f"  Kamera {cam_index} kann nicht lesen")
+                    cap.release()
+            else:
+                print(f"  Index {cam_index} nicht verfügbar")
+        
+        if camera is None:
+            print("ERROR: Keine funktionierende Kamera gefunden!")
+            print("Tipps:")
+            print("1. USB-Kamera angeschlossen?")
+            print("2. Kamera-Berechtigung überprüfen: ls -la /dev/video*")
+            print("3. Versuche: v4l2-ctl --list-devices")
+            return
+        
+        # Kamera-Auflösung setzen
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, IMAGE_WIDTH)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, IMAGE_HEIGHT)
+        camera.set(cv2.CAP_PROP_FPS, 30)
+        
+        print(f"Kamera-Einstellungen: {int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
 
     window_name = "Live Feed - Drücke ENTER zum Speichern, F für Autofokus, ESC zum Beenden"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
     try:
         while True:
-            frame = picam2.capture_array()
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            if PICAMERA2_AVAILABLE:
+                frame = camera.capture_array()
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            else:
+                ret, frame = camera.read()
+                if not ret:
+                    print("ERROR: Frame konnte nicht gelesen werden!")
+                    break
+                rgb_frame = frame
+
             add_overlay(rgb_frame, f"Bild {next_index:04d} | ENTER=Speichern | F=Autofokus | ESC=Beenden")
             cv2.imshow(window_name, rgb_frame)
 
@@ -96,9 +156,12 @@ def main() -> None:
                 else:
                     print(f"Fehler beim Speichern von {image_path}")
             if key == ord("f") or key == ord("F"):  # F-Taste für Autofokus
-                trigger_autofocus(picam2)
+                trigger_autofocus(camera)
     finally:
-        picam2.close()
+        if PICAMERA2_AVAILABLE:
+            camera.close()
+        else:
+            camera.release()
         cv2.destroyAllWindows()
 
 
