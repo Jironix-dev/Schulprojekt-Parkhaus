@@ -614,6 +614,201 @@ h3 {
     padding: 25px;
 }
 
+/* ==================== RECOGNITION PANEL ==================== */
+
+.recognition-panel {
+    width: 100%;
+    margin-top: 20px;
+    padding: 15px !important;
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    color: white;
+    border: 2px solid #1e40af;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.recognition-panel h3 {
+    margin: 0;
+    font-size: 1.2em;
+    color: white;
+}
+
+.recognition-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.btn-recognize, .btn-upload {
+    flex: 1;
+    min-width: 120px;
+    padding: 10px 15px;
+    background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: bold;
+    transition: all 0.3s;
+}
+
+.btn-upload {
+    background: linear-gradient(135deg, #2196F3 0%, #1565C0 100%);
+}
+
+.btn-recognize:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+}
+
+.btn-upload:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(33, 150, 243, 0.4);
+}
+
+.recognition-result {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 15px;
+    display: none;
+}
+
+.recognition-result.hidden {
+    display: none;
+}
+
+.recognition-result.visible {
+    display: block;
+}
+
+.result-images {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.result-image {
+    width: 100%;
+    border-radius: 8px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.recognition-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.stat {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 10px;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.stat-label {
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
+.stat-value {
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #4CAF50;
+}
+
+.stat-value.highlight {
+    color: #FFD700;
+    font-size: 1.2em;
+}
+
+/* ==================== RECOGNITION MODAL ==================== */
+
+.modal-recognition {
+    max-width: 1000px;
+}
+
+.recognition-details-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+}
+
+.detail-item h4 {
+    margin: 0;
+    color: #1e40af;
+    font-size: 1em;
+}
+
+.detail-image {
+    width: 100%;
+    max-height: 250px;
+    object-fit: contain;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    background: #f5f5f5;
+}
+
+.recognition-info-box {
+    background: #f5f5f5;
+    padding: 20px;
+    border-radius: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+}
+
+.info-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.info-group .label {
+    font-weight: bold;
+    color: #1e40af;
+    font-size: 0.9em;
+}
+
+.info-group .value {
+    color: #333;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.info-group .value.highlight {
+    color: #FFD700;
+    background: #f0f0f0;
+    padding: 5px 10px;
+    border-radius: 5px;
+}
+
+/* ==================== RESPONSIVE ==================== */
+
+@media (max-width: 1024px) {
+    .recognition-details-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .recognition-info-box {
+        grid-template-columns: 1fr;
+    }
+}
+
 .data-list {
     margin-bottom: 20px;
 }

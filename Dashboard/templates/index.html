@@ -24,6 +24,39 @@
                 <h3>📹 Live-Feed</h3>
                 <img id="live-feed-img" src="/api/stream" alt="Kamera-Feed">
             </div>
+            
+            <!-- 🚨 Kennzeichen-Erkennung Panel -->
+            <div class="card recognition-panel">
+                <h3>🚨 Kennzeichen-Erkennung</h3>
+                <div class="recognition-controls">
+                    <button class="btn btn-recognize" onclick="recognizePlate()">🔍 Jetzt erkennen</button>
+                    <button class="btn btn-upload" onclick="document.getElementById('upload-image').click()">📤 Bild hochladen</button>
+                    <input type="file" id="upload-image" accept="image/*" style="display:none;" onchange="recognizeUpload(event)">
+                </div>
+                
+                <div id="recognition-result" class="recognition-result hidden">
+                    <!-- Ergebnisse werden hier eingefügt -->
+                </div>
+                
+                <div class="recognition-stats">
+                    <div class="stat">
+                        <span class="stat-label">Erkanntes Kennzeichen:</span>
+                        <span class="stat-value" id="recognized-plate">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">YOLO Konfidenz:</span>
+                        <span class="stat-value" id="yolo-confidence">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">OCR Konfidenz:</span>
+                        <span class="stat-value" id="ocr-confidence">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Kombiniert:</span>
+                        <span class="stat-value highlight" id="combined-confidence">-</span>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Widgets (Rechts) -->
@@ -256,4 +289,62 @@
 <script src="/static/script.js"></script>
 
 </body>
+<!-- Modal: Kennzeichen-Erkennungs-Details -->
+<div id="modal-recognition-details" class="modal">
+    <div class="modal-content modal-recognition">
+        <div class="modal-header">
+            <h2>📷 Erkennungs-Details</h2>
+            <button class="modal-close" onclick="closeModal('recognition-details')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="recognition-details-grid">
+                <!-- Fahrzeug-Snapshot -->
+                <div class="detail-item">
+                    <h4>Fahrzeug</h4>
+                    <img id="detail-vehicle-snapshot" src="" alt="Fahrzeug-Snapshot" class="detail-image">
+                </div>
+                
+                <!-- Kennzeichen ausgeschnitten -->
+                <div class="detail-item">
+                    <h4>Kennzeichen</h4>
+                    <img id="detail-plate-image" src="" alt="Kennzeichen" class="detail-image">
+                </div>
+                
+                <!-- Annotiertes Bild -->
+                <div class="detail-item">
+                    <h4>Mit Bounding Box</h4>
+                    <img id="detail-annotated-frame" src="" alt="Annotiert" class="detail-image">
+                </div>
+            </div>
+            
+            <div class="recognition-info-box">
+                <div class="info-group">
+                    <span class="label">Erkanntes Kennzeichen:</span>
+                    <span class="value" id="detail-plate-text">-</span>
+                </div>
+                <div class="info-group">
+                    <span class="label">YOLO Konfidenz:</span>
+                    <span class="value" id="detail-yolo-conf">-</span>
+                </div>
+                <div class="info-group">
+                    <span class="label">OCR Konfidenz:</span>
+                    <span class="value" id="detail-ocr-conf">-</span>
+                </div>
+                <div class="info-group">
+                    <span class="label">Kombinierte Konfidenz:</span>
+                    <span class="value highlight" id="detail-combined-conf">-</span>
+                </div>
+                <div class="info-group">
+                    <span class="label">Erkannungsregion:</span>
+                    <span class="value" id="detail-region">-</span>
+                </div>
+                <div class="info-group">
+                    <span class="label">Zeitstempel:</span>
+                    <span class="value" id="detail-timestamp">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 </html>

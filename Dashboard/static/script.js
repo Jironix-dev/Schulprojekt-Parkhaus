@@ -272,6 +272,150 @@ function pay() {
     .catch(err => console.error("Fehler bei der Zahlung:", err));
 }
 
+// ==================== PLATE RECOGNITION FUNCTIONS ====================
+
+/**
+ * Erkennt Kennzeichen im aktuellen Live-Feed
+ */
+async function recognizePlate() {
+    const resultDiv = document.getElementById("recognition-result");
+    resultDiv.classList.remove("visible");
+    resultDiv.innerHTML = '<p style="text-align:center; color:#fff;">⏳ Erkenne...</p>';
+    resultDiv.classList.add("visible");
+    
+    try {
+        const response = await fetch("/api/recognition/detect-plate", {
+            method: "POST"
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayRecognitionResult(data);
+        } else {
+            showRecognitionError(data.error || "Erkennungsfehler");
+        }
+    } catch (error) {
+        showRecognitionError("Fehler beim Verbinden: " + error.message);
+    }
+}
+
+/**
+ * Erkennt Kennzeichen in hochgeladenem Bild
+ */
+async function recognizeUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const resultDiv = document.getElementById("recognition-result");
+    resultDiv.classList.remove("visible");
+    resultDiv.innerHTML = '<p style="text-align:center; color:#fff;">⏳ Erkenne...</p>';
+    resultDiv.classList.add("visible");
+    
+    const formData = new FormData();
+    formData.append("file", file);
+    
+    try {
+        const response = await fetch("/api/recognition/upload-image", {
+            method: "POST",
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayRecognitionResult(data);
+        } else {
+            showRecognitionError(data.error || "Erkennungsfehler");
+        }
+    } catch (error) {
+        showRecognitionError("Fehler beim Upload: " + error.message);
+    }
+}
+
+/**
+ * Zeigt Erkennungsergebnisse an
+ */
+function displayRecognitionResult(data) {
+    const resultDiv = document.getElementById("recognition-result");
+    
+    // Update Stats
+    document.getElementById("recognized-plate").innerText = data.detected_plate || "-";
+    document.getElementById("yolo-confidence").innerText = (data.plate_confidence * 100).toFixed(1) + "%";
+    document.getElementById("ocr-confidence").innerText = (data.ocr_confidence * 100).toFixed(1) + "%";
+    document.getElementById("combined-confidence").innerText = (data.combined_confidence * 100).toFixed(1) + "%";
+    
+    // Build Result HTML
+    let html = '<div class="result-images">';
+    
+    if (data.vehicle_snapshot) {
+        html += `<img src="${data.vehicle_snapshot}" alt="Fahrzeug" class="result-image" onclick="showDetailModal('${encodeURIComponent(JSON.stringify(data))}')" style="cursor:pointer;">`;
+    }
+    
+    if (data.plate_image) {
+        html += `<img src="${data.plate_image}" alt="Kennzeichen" class="result-image" onclick="showDetailModal('${encodeURIComponent(JSON.stringify(data))}')" style="cursor:pointer;">`;
+    }
+    
+    html += '</div>';
+    html += `<button class="btn btn-recognize" onclick="showDetailModal('${encodeURIComponent(JSON.stringify(data))}')">📷 Details anzeigen</button>`;
+    
+    resultDiv.innerHTML = html;
+    resultDiv.classList.add("visible");
+}
+
+/**
+ * Zeigt Error Message an
+ */
+function showRecognitionError(message) {
+    const resultDiv = document.getElementById("recognition-result");
+    resultDiv.innerHTML = `<p style="text-align:center; color:#ffcccc;">❌ ${message}</p>`;
+    resultDiv.classList.add("visible");
+}
+
+/**
+ * Zeigt Detail-Modal mit allen Ergebnissen
+ */
+function showDetailModal(encodedData) {
+    const data = JSON.parse(decodeURIComponent(encodedData));
+    
+    // Setze Bilder
+    if (data.vehicle_snapshot) {
+        document.getElementById("detail-vehicle-snapshot").src = data.vehicle_snapshot;
+    }
+    if (data.plate_image) {
+        document.getElementById("detail-plate-image").src = data.plate_image;
+    }
+    if (data.annotated_frame) {
+        document.getElementById("detail-annotated-frame").src = data.annotated_frame;
+    }
+    
+    // Setze Infos
+    document.getElementById("detail-plate-text").innerText = data.detected_plate || "-";
+    document.getElementById("detail-yolo-conf").innerText = (data.plate_confidence * 100).toFixed(2) + "%";
+    document.getElementById("detail-ocr-conf").innerText = (data.ocr_confidence * 100).toFixed(2) + "%";
+    document.getElementById("detail-combined-conf").innerText = (data.combined_confidence * 100).toFixed(2) + "%";
+    
+    if (data.plate_region) {
+        const region = data.plate_region;
+        document.getElementById("detail-region").innerText = 
+            `X: ${region.x1}-${region.x2}, Y: ${region.y1}-${region.y2} (${region.width}×${region.height}px)`;
+    }
+    
+    document.getElementById("detail-timestamp").innerText = data.timestamp || "-";
+    
+    // Öffne Modal
+    openModal("recognition-details");
+}
+
+// Initialisiere bei Page Load
+window.addEventListener('DOMContentLoaded', function() {
+    initializeLiveFeed();
+    updateTime();
+    setInterval(updateTime, 1000);
+    update();
+    setInterval(update, 5000);
+});
+
 // Initial updates
 updateTime();
 update();
