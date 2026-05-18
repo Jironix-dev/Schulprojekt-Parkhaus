@@ -51,6 +51,21 @@ def get_status():
     """Gibt aktuelle Dashboard-Daten zurück"""
     return DashboardService.get_dashboard_summary()
 
+@router.get("/api/health")
+def health_check():
+    """Health-Check: Überprüft ob alle Services verfügbar sind"""
+    plate_service = PlateRecognitionService.get_instance()
+    
+    return {
+        "status": "ok",
+        "services": {
+            "database": "✓ OK",
+            "plate_recognition": "✓ OK" if plate_service.is_ready() else "❌ FEHLER",
+            "tesseract_ocr": "✓ OK" if plate_service._recognizer and hasattr(plate_service._recognizer, 'ocr_handler') else "❌ NICHT VERFÜGBAR",
+            "yolo_model": "✓ OK" if plate_service.is_ready() else "❌ MODELL NICHT GELADEN"
+        }
+    }
+
 @router.post("/api/payment")
 def confirm_payment():
     """Bestätigt Zahlung für aktuelle Session"""

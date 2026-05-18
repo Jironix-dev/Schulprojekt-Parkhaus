@@ -8,6 +8,7 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -156,6 +157,9 @@ class PlateRecognizer:
                 2
             )
             
+            # Überprüfe ob Kennzeichen gültig oder ungültig ist
+            plate_valid = self._is_valid_plate(detected_text)
+            
             result = PlateDetectionResult(
                 success=True,
                 detected_plate=detected_text,
@@ -164,10 +168,11 @@ class PlateRecognizer:
                 plate_region=plate_region,
                 plate_image=plate_image,
                 annotated_frame=annotated_frame,
-                detection_timestamp=datetime.now().isoformat()
+                detection_timestamp=datetime.now().isoformat(),
+                plate_valid=plate_valid
             )
             
-            logger.info(f"✓ Kennzeichen erkannt: {detected_text} (Conf: {confidence:.2%})")
+            logger.info(f"✓ Kennzeichen erkannt: {detected_text} (Conf: {confidence:.2%}, Valid: {plate_valid})")
             return result
             
         except Exception as e:
@@ -197,6 +202,40 @@ class PlateRecognizer:
         """Extrahiert Koordinaten aus YOLO Box"""
         xyxy = box.xyxy[0].cpu().numpy()
         return float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
+    
+    def _is_valid_plate(self, detected_plate: str) -> bool:
+        """
+        Überprüft ob erkanntes Kennzeichen gültig oder ungültig ist
+        
+        Gültig: A 1234 (Buchstabe + Leerzeichen + 4 Ziffern)
+        Ungültig: A ABCD (Buchstabe + Leerzeichen + 4 Buchstaben)
+        
+        Args:
+            detected_plate: Erkannter Text
+            
+        Returns:
+            True wenn gültig (nur Zahlen im Nummernblock), False wenn ungültig (Buchstaben statt Zahlen)
+        """
+        if not detected_plate:
+            return False
+        
+        normalized = detected_plate.upper().strip()
+        
+        # Überprüfe gültiges Format: A 1234
+        valid_match = re.match(r'^([A-ZÄÖÜ])\s(\d{4})$', normalized)
+        if valid_match:
+            logger.info(f"✓ [VALID] Kennzeichen: '{normalized}'")
+            return True
+        
+        # Überprüfe ungültiges Format: A ABCD
+        invalid_match = re.match(r'^([A-ZÄÖÜ])\s([A-ZÄÖÜ]{4})$', normalized)
+        if invalid_match:
+            logger.warning(f"❌ [INVALID] Falsches Kennzeichen: '{normalized}'")
+            return False
+        
+        # Unbekanntes Format
+        logger.warning(f"⚠️ [UNKNOWN] Unbekanntes Format: '{normalized}'")
+        return False
     
     def process_frame_batch(self, frames: list) -> list:
         """

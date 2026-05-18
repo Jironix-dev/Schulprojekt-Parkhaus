@@ -59,6 +59,9 @@ class PlateDetectionResult:
     detection_timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     error: str = ""
     
+    # Validierungsstatus
+    plate_valid: bool = True  # True: gültig (A 1234), False: ungültig (A ABCD), None: unbekannt
+    
     # Pfade (falls Bilder gespeichert wurden)
     snapshot_path: Optional[str] = None
     plate_image_path: Optional[str] = None
@@ -82,6 +85,7 @@ class PlateDetectionResult:
             'plate_region': self.plate_region.to_dict() if self.plate_region else None,
             'detection_timestamp': self.detection_timestamp,
             'error': self.error,
+            'plate_valid': self.plate_valid,
             'snapshot_path': self.snapshot_path,
             'plate_image_path': self.plate_image_path,
             'annotated_path': self.annotated_path

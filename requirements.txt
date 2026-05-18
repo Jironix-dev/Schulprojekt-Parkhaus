@@ -5,5 +5,7 @@ jinja2
 picamera2
 ultralytics
 pytesseract
+easyocr
 pillow
 numpy
+python-multipart

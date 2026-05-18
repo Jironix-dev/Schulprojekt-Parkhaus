@@ -289,6 +289,7 @@ async function recognizePlate() {
         });
         
         const data = await response.json();
+        console.log("Recognition Response:", data); // Debug
         
         if (data.success) {
             displayRecognitionResult(data);
@@ -296,6 +297,7 @@ async function recognizePlate() {
             showRecognitionError(data.error || "Erkennungsfehler");
         }
     } catch (error) {
+        console.error("Recognition Error:", error); // Debug
         showRecognitionError("Fehler beim Verbinden: " + error.message);
     }
 }
@@ -339,14 +341,45 @@ async function recognizeUpload(event) {
 function displayRecognitionResult(data) {
     const resultDiv = document.getElementById("recognition-result");
     
+    console.log("Displaying result:", data); // Debug
+    console.log("Detected Plate:", data.detected_plate); // Debug
+    console.log("Plate Valid:", data.plate_valid); // Debug
+    
     // Update Stats
-    document.getElementById("recognized-plate").innerText = data.detected_plate || "-";
+    const plateElement = document.getElementById("recognized-plate");
+    if (plateElement) {
+        // Zeige Platte an und markiere, wenn ungültig
+        if (data.plate_valid === false) {
+            plateElement.innerText = `${data.detected_plate} ❌ FALSCH`;
+            plateElement.style.color = "#ff6b6b";
+            console.log("Kennzeichen ist UNGÜLTIG"); // Debug
+        } else if (data.plate_valid === true) {
+            plateElement.innerText = `${data.detected_plate} ✓`;
+            plateElement.style.color = "#51cf66";
+            console.log("Kennzeichen ist GÜLTIG"); // Debug
+        } else {
+            plateElement.innerText = data.detected_plate || "-";
+            plateElement.style.color = "#ffd93d";
+            console.log("Kennzeichen Status: UNBEKANNT"); // Debug
+        }
+        console.log("Updated plate element to:", plateElement.innerText); // Debug
+    } else {
+        console.error("recognized-plate element not found!"); // Debug
+    }
+    
     document.getElementById("yolo-confidence").innerText = (data.plate_confidence * 100).toFixed(1) + "%";
     document.getElementById("ocr-confidence").innerText = (data.ocr_confidence * 100).toFixed(1) + "%";
     document.getElementById("combined-confidence").innerText = (data.combined_confidence * 100).toFixed(1) + "%";
     
-    // Build Result HTML
+    // Build Result HTML - mit Status-Hinweis
     let html = '<div class="result-images">';
+    
+    // Status-Hinweis
+    if (data.plate_valid === false) {
+        html += '<div style="background:#ff6b6b; color:white; padding:10px; border-radius:8px; margin-bottom:10px; text-align:center; font-weight:bold;">❌ UNGÜLTIGES KENNZEICHEN ERKANNT!</div>';
+    } else if (data.plate_valid === true) {
+        html += '<div style="background:#51cf66; color:white; padding:10px; border-radius:8px; margin-bottom:10px; text-align:center; font-weight:bold;">✓ Gültiges Kennzeichen</div>';
+    }
     
     if (data.vehicle_snapshot) {
         html += `<img src="${data.vehicle_snapshot}" alt="Fahrzeug" class="result-image" onclick="showDetailModal('${encodeURIComponent(JSON.stringify(data))}')" style="cursor:pointer;">`;

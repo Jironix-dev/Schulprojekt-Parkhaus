@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Parkhaus Dashboard</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v={{ range(0, 10000) | random }}">
 </head>
 <body>
 
@@ -30,8 +30,6 @@
                 <h3>🚨 Kennzeichen-Erkennung</h3>
                 <div class="recognition-controls">
                     <button class="btn btn-recognize" onclick="recognizePlate()">🔍 Jetzt erkennen</button>
-                    <button class="btn btn-upload" onclick="document.getElementById('upload-image').click()">📤 Bild hochladen</button>
-                    <input type="file" id="upload-image" accept="image/*" style="display:none;" onchange="recognizeUpload(event)">
                 </div>
                 
                 <div id="recognition-result" class="recognition-result hidden">
@@ -286,7 +284,7 @@
     </div>
 </div>
 
-<script src="/static/script.js"></script>
+<script src="/static/script.js?v={{ range(0, 10000) | random }}"></script>
 
 </body>
 <!-- Modal: Kennzeichen-Erkennungs-Details -->

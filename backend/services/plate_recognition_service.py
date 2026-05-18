@@ -15,9 +15,9 @@ import base64
 # Füge AI zum Pfad hinzu
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "AI"))
 
-from plate_recognizer import PlateRecognizer
-from plate_detection_models import PlateDetectionResult, RecognitionStatistics
-from image_processor import ImageProcessor
+from AI.plate_recognizer import PlateRecognizer
+from AI.plate_detection_models import PlateDetectionResult, RecognitionStatistics
+from AI.image_processor import ImageProcessor
 
 logger = logging.getLogger(__name__)
 
