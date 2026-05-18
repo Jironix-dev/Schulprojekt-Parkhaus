@@ -15,11 +15,20 @@ function updateTime() {
     document.getElementById("current-date").innerText = `${day}.${month}.${year}`;
 }
 
-// Aktualisiere Live-Feed
-function updateLiveFeed() {
+// Live-Feed Management - nutze Motion JPEG Stream (nicht einzelne Frames!)
+function initializeLiveFeed() {
     const feedImg = document.getElementById("live-feed-img");
     if (feedImg) {
-        // Ändere src mit Timestamp um Cache zu umgehen
+        // Nutze den Motion JPEG Stream direkt - NICHT updateLiveFeed aufrufen!
+        feedImg.src = "/api/stream";
+        feedImg.style.display = "block";
+    }
+}
+
+// Nur für Debugging: Einzelnen Frame abrufen (optional)
+function getStaticFrame() {
+    const feedImg = document.getElementById("live-feed-img");
+    if (feedImg) {
         feedImg.src = "/api/camera/frame?t=" + Date.now();
     }
 }
@@ -266,7 +275,7 @@ function pay() {
 // Initial updates
 updateTime();
 update();
-updateLiveFeed();
+initializeLiveFeed();  // Initialize Motion JPEG Stream once
 
 // Update Zeit jede Sekunde
 setInterval(updateTime, 1000);
@@ -274,5 +283,4 @@ setInterval(updateTime, 1000);
 // Update Dashboard-Daten alle 2 Sekunden
 setInterval(update, 2000);
 
-// Update Live-Feed alle 0,5 Sekunden (~2 FPS)
-setInterval(updateLiveFeed, 500);
+// Motion JPEG Stream läuft kontinuierlich - kein periodisches Update nötig!

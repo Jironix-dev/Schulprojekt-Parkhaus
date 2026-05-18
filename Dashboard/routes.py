@@ -196,3 +196,17 @@ def get_camera_status():
         "active": live_feed.is_active(),
         "status": "aktiv" if live_feed.is_active() else "inaktiv"
     }
+
+
+@router.get("/api/debug/camera")
+def debug_camera():
+    """Debug-Endpoint: Zeigt Kamera-Status und Fallback-Bild-Größe"""
+    frame = get_static_frame()
+    return {
+        "camera_active": live_feed.is_active(),
+        "frame_size_bytes": len(frame),
+        "fallback_frame_size_bytes": len(live_feed.fallback_frame),
+        "frame_is_empty": len(frame) == 0,
+        "has_camera_object": live_feed.camera is not None,
+        "capture_thread_alive": live_feed.capture_thread is not None and live_feed.capture_thread.is_alive() if live_feed.capture_thread else False
+    }
