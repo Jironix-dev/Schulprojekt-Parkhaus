@@ -1,95 +1,98 @@
 """
 OCR Handler: Optische Zeichenerkennung für Kennzeichen
-Nutzt Tesseract oder pytesseract zur Text-Erkennung
+Nutzt Tesseract OCR für ultra-schnelle Text-Erkennung (optimiert für ARM/RPi5)
+Fallback: PaddleOCR für komplexere Szenen
 """
 
 import cv2
 import numpy as np
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional
 import logging
 import re
-import string
+import time
 
 logger = logging.getLogger(__name__)
 
 # Versuche pytesseract zu importieren
 try:
     import pytesseract
-    from PIL import Image
     TESSERACT_AVAILABLE = True
     logger.info("✓ Tesseract OCR verfügbar")
 except ImportError:
+    pytesseract = None  # type: ignore
     TESSERACT_AVAILABLE = False
-    logger.warning("Tesseract OCR nicht installiert!")
+    logger.warning("⚠️ Tesseract OCR nicht installiert!")
 
-# Versuche EasyOCR zu importieren
+# Fallback: PaddleOCR
 try:
-    import easyocr
-    EASYOCR_AVAILABLE = True
-    logger.info("✓ EasyOCR verfügbar")
+    from paddleocr import PaddleOCR
+    PADDLEOCR_AVAILABLE = True
+    logger.info("✓ PaddleOCR verfügbar (Fallback)")
 except ImportError:
-    EASYOCR_AVAILABLE = False
-    logger.warning("EasyOCR nicht installiert!")
+    PaddleOCR = None  # type: ignore
+    PADDLEOCR_AVAILABLE = False
+    logger.info("ℹ️ PaddleOCR nicht verfügbar (nur Tesseract)")
 
 
 class OCRHandler:
     """
-    Verarbeitet optische Zeichenerkennung für Kennzeichen
-    Nutzt Tesseract/pytesseract mit Preprocessing
-    Custom Format: A 1234 (ein Buchstabe, Leerzeichen, 4 Ziffern)
+    Optische Zeichenerkennung für Kennzeichen
+    Primär: Tesseract OCR (ultra-schnell)
+    Fallback: PaddleOCR (genauer bei komplexen Bildern)
     """
     
-    # Muster für custom Kennzeichen: z.B. "A 1234"
+    # Muster für Kennzeichen-Validierung
     PLATE_PATTERN = re.compile(r'^[A-ZÄÖÜ]\s\d{4}$')
     
-    def __init__(self, lang: str = 'deu', cleanup: bool = True, use_easyocr: bool = False):
+    def __init__(self, lang: str = 'en', cleanup: bool = True):
         """
-        Initialisiert OCRHandler
+        Initialisiert OCRHandler mit Tesseract
         
         Args:
-            lang: Sprache für Tesseract ('deu' für Deutsch, 'eng' für Englisch, usw.)
+            lang: Sprache ('en' für Englisch)
             cleanup: Bildvorverarbeitung durchführen
-            use_easyocr: EasyOCR verwenden (langsam, aber genauer - nur bei Bedarf)
         """
         self.lang = lang
         self.cleanup = cleanup
-        self.confidence_threshold = 0.3  # Minimale Konfidenz
-        self.easyocr_reader = None
-        self.use_easyocr = use_easyocr
-        self._easyocr_loaded = False
+        self.confidence_threshold = 0.3
+        self.tesseract_reader = None
+        self.paddle_reader = None
+        self._recognition_cache = {}  # Cache für häufig erkannte Kennzeichen
+        self.use_paddle_fallback = PADDLEOCR_AVAILABLE
         
-        if not TESSERACT_AVAILABLE:
-            logger.warning("Warnung: Tesseract nicht verfügbar!")
-        
-        logger.info(f"[OCR] EasyOCR aktiviert: {use_easyocr}")
+        logger.info("[Tesseract] Handler initialisiert")
+        logger.info(f"[Tesseract] Fallback zu PaddleOCR: {self.use_paddle_fallback}")
     
-    def _load_easyocr(self):
-        """Lazy Loading für EasyOCR Reader - nur bei Bedarf"""
-        if self._easyocr_loaded or self.easyocr_reader is not None:
+    def _load_ocr(self):
+        """Lazy Loading für OCR - nur wenn nötig"""
+        if self.paddle_reader is not None or not PADDLEOCR_AVAILABLE:
             return
         
-        if not EASYOCR_AVAILABLE:
-            logger.warning("[EasyOCR] Nicht installiert!")
-            self._easyocr_loaded = True
+        if PaddleOCR is None:
+            logger.warning("[PaddleOCR] PaddleOCR nicht verfügbar")
             return
         
         try:
-            logger.info("[EasyOCR] Lade Reader (erste Nutzung)...")
-            self.easyocr_reader = easyocr.Reader(['de', 'en'], gpu=False)
-            logger.info("✓ [EasyOCR] Reader erfolgreich geladen")
-            self._easyocr_loaded = True
+            logger.info("[PaddleOCR] Lade Reader (erste Nutzung als Fallback)...")
+            self.paddle_reader = PaddleOCR(
+                use_angle_cls=False,
+                lang='en',
+                use_gpu=False,
+            )
+            logger.info("✓ [PaddleOCR] Reader erfolgreich geladen")
         except Exception as e:
-            logger.warning(f"[EasyOCR] Konnte Reader nicht laden: {e}")
-            self._easyocr_loaded = True
+            logger.error(f"[PaddleOCR] Fehler beim Laden: {e}")
+            self.paddle_reader = None
     
     def extract_text(self, plate_image: np.ndarray) -> Tuple[str, float]:
         """
-        Extrahiert Text aus Kennzeichen-Bild mit OCR (optimiert für Geschwindigkeit)
+        Extrahiert Text aus Kennzeichen-Bild mit Tesseract (ultra-schnell!)
         
-        Schnelle Strategie (Standard):
-        1. Tesseract mit 2 schnellen Preprocessing-Varianten
-        2. Wähle beste Erkennung
-        3. Fertig in <2 Sekunden
+        Strategie:
+        1. Cache prüfen (0ms) 🚀
+        2. Tesseract RAW (50-150ms) ⚡
+        3. Tesseract mit Preprocessing (100-200ms) 
+        4. Fallback zu PaddleOCR wenn konfiguriert (200-400ms)
         
         Args:
             plate_image: OpenCV Image des Kennzeichens (BGR)
@@ -101,582 +104,352 @@ class OCRHandler:
             logger.error("❌ Ungültiges Eingabebild")
             return "", 0.0
         
-        logger.info(f"[OCR] Eingabe-Bildgröße: {plate_image.shape}")
+        h, w = plate_image.shape[:2]
+        logger.info(f"[Tesseract] Eingabe-Bildgröße: {w}x{h}px")
         
-        results = []
+        # ===== UPSCALING: Falls zu klein, vergrößere das Bild =====
+        if w < 100 or h < 30:
+            logger.info(f"[Tesseract] Bild zu klein ({w}x{h}), skaliere hoch...")
+            scale_factor = max(100 / w, 30 / h) * 1.5
+            new_w = int(w * scale_factor)
+            new_h = int(h * scale_factor)
+            plate_image = cv2.resize(plate_image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            logger.info(f"[Tesseract] Nach Upscaling: {new_w}x{new_h}px")
         
-        # ===== TESSERACT ERKENNUNG (SCHNELL) =====
-        if TESSERACT_AVAILABLE:
-            logger.info("[OCR] Starte Tesseract-Erkennung (2 Varianten)...")
-            tess_results = self._tesseract_multi_variant(plate_image)
-            results.extend(tess_results)
+        # ===== CACHING: Prüfe ob dieses Bild bereits erkannt wurde =====
+        image_hash = hash(plate_image.tobytes())
+        if image_hash in self._recognition_cache:
+            cached_result = self._recognition_cache[image_hash]
+            logger.info(f"[CACHE-HIT] ✓ Ergebnis aus Cache: '{cached_result[0]}' (Conf: {cached_result[1]:.2%})")
+            return cached_result
         
-        # ===== EASYOCR NUR BEI BEDARF =====
-        # EasyOCR ist sehr langsam - nur wenn explizit angefordert
-        if self.use_easyocr and EASYOCR_AVAILABLE:
-            logger.info("[OCR] EasyOCR angefordert - lade Reader...")
-            self._load_easyocr()
-            if self.easyocr_reader:
-                logger.info("[OCR] Starte EasyOCR-Erkennung...")
-                easy_results = self._easyocr_recognize(plate_image)
-                results.extend(easy_results)
-        
-        if not results:
-            logger.warning("[OCR] ⚠️ Keine verwertbaren Ergebnisse!")
+        if not TESSERACT_AVAILABLE:
+            logger.error("❌ Tesseract nicht verfügbar!")
             return "", 0.0
         
-        # Sortiere nach Validität und Konfidenz
-        results.sort(key=lambda x: (
-            self._is_valid_format(x[0]) or self._is_invalid_plate_format(x[0]),
-            self._is_valid_format(x[0]),
-            x[1]
-        ), reverse=True)
+        # ===== VERSUCH 1: TESSERACT RAW (SUPER SCHNELL!) =====
+        logger.info("[Tesseract] Versuch 1: RAW image ohne Preprocessing")
         
-        best_text, best_conf, engine = results[0]
-        logger.info(f"✓ [OCR] Beste Erkennung aus {engine}: '{best_text}' (Conf: {best_conf:.2%})")
-        
-        cleaned_text = self._clean_text(best_text)
-        final_conf = self._calculate_confidence(cleaned_text, best_text)
-        
-        logger.info(f"✓ [OCR] Final: '{cleaned_text}' (Conf: {final_conf:.2%})")
-        
-        return cleaned_text, final_conf
-    
-    def _tesseract_multi_variant(self, plate_image: np.ndarray) -> List[Tuple[str, float, str]]:
-        """
-        Tesseract mit smartem Fallback-System (sehr schnell)
-        
-        1. Versuche nur Variante 1 (Standard - 1 Sekunde)
-        2. Wenn Konfidenz < 0.5, versuche auch Variante 2 (Aggressiv - +2 Sekunden)
-        3. Nutze beste Erkennung
-        """
-        results = []
-        
-        # Variante 1: Standard Preprocessing (IMMER)
-        logger.info("[OCR] Variante 1: Standard Preprocessing")
-        text_1, conf_1 = self._extract_with_tesseract(plate_image, 1)
-        if text_1:
-            results.append((text_1, conf_1, "Tesseract-Standard"))
-            logger.info(f"[OCR] Standard-Erkennung: '{text_1}' (Conf: {conf_1:.2%})")
-            
-            # Fallback: Nur versuchen wenn Standard schlecht war
-            if conf_1 < 0.5:
-                logger.info("[OCR] Konfidenz niedrig - versuche Variante 2")
-                text_2, conf_2 = self._extract_with_tesseract(plate_image, 2)
-                if text_2:
-                    results.append((text_2, conf_2, "Tesseract-Aggressiv"))
-                    logger.info(f"[OCR] Aggressiv-Erkennung: '{text_2}' (Conf: {conf_2:.2%})")
-        
-        return results
-    
-    def _extract_with_tesseract(self, plate_image: np.ndarray, variant: int) -> Tuple[str, float]:
-        """Tesseract OCR mit spezieller Preprocessing-Variante (schnell)"""
         try:
-            if variant == 1:
-                # Standard: Schnell und zuverlässig
-                processed = self._preprocess_image(plate_image, aggressive=False)
-            elif variant == 2:
-                # Aggressiv: Besserer Kontrast für schwierige Bilder
-                processed = self._preprocess_image(plate_image, aggressive=True)
-            else:
-                processed = self._preprocess_image(plate_image, aggressive=False)
+            text, confidence = self._extract_with_tesseract(plate_image)
             
-            # OCR mit Tesseract
-            custom_config = r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ0123456789 '
+            if text and text.strip():
+                cleaned_text = self._clean_text(text)
+                final_conf = self._calculate_confidence(cleaned_text, text, confidence)
+                
+                logger.info(f"✓ [Tesseract] SUCCESS: '{cleaned_text}' (Conf: {final_conf:.2%})")
+                
+                # Cache
+                self._recognition_cache[image_hash] = (cleaned_text, final_conf)
+                if len(self._recognition_cache) > 100:
+                    keys_to_remove = list(self._recognition_cache.keys())[:-50]
+                    for key in keys_to_remove:
+                        del self._recognition_cache[key]
+                
+                return cleaned_text, final_conf
+        except Exception as e:
+            logger.warning(f"[Tesseract] RAW Fehler: {e}")
+        
+        # ===== VERSUCH 2: TESSERACT MIT PREPROCESSING =====
+        logger.info("[Tesseract] Versuch 2: Mit Preprocessing")
+        
+        try:
+            processed = self._preprocess_image(plate_image, aggressive=False)
+            text, confidence = self._extract_with_tesseract(processed)
             
-            extracted_text = pytesseract.image_to_string(
-                processed,
-                lang=self.lang,
-                config=custom_config
-            ).strip()
+            if text and text.strip():
+                cleaned_text = self._clean_text(text)
+                final_conf = self._calculate_confidence(cleaned_text, text, confidence)
+                
+                logger.info(f"✓ [Tesseract] PREPROCESSED SUCCESS: '{cleaned_text}' (Conf: {final_conf:.2%})")
+                
+                # Cache
+                self._recognition_cache[image_hash] = (cleaned_text, final_conf)
+                if len(self._recognition_cache) > 100:
+                    keys_to_remove = list(self._recognition_cache.keys())[:-50]
+                    for key in keys_to_remove:
+                        del self._recognition_cache[key]
+                
+                return cleaned_text, final_conf
+        except Exception as e:
+            logger.warning(f"[Tesseract] Preprocessing Fehler: {e}")
+        
+        # ===== VERSUCH 3: TESSERACT MIT AGGRESSIVEM PREPROCESSING =====
+        logger.info("[Tesseract] Versuch 3: Aggressive Preprocessing")
+        
+        try:
+            processed = self._preprocess_image(plate_image, aggressive=True)
+            text, confidence = self._extract_with_tesseract(processed)
             
-            logger.info(f"[Tesseract] Variante {variant} Raw: '{extracted_text}'")
+            if text and text.strip():
+                cleaned_text = self._clean_text(text)
+                final_conf = self._calculate_confidence(cleaned_text, text, confidence)
+                
+                logger.info(f"✓ [Tesseract] AGGRESSIVE SUCCESS: '{cleaned_text}' (Conf: {final_conf:.2%})")
+                
+                # Cache
+                self._recognition_cache[image_hash] = (cleaned_text, final_conf)
+                if len(self._recognition_cache) > 100:
+                    keys_to_remove = list(self._recognition_cache.keys())[:-50]
+                    for key in keys_to_remove:
+                        del self._recognition_cache[key]
+                
+                return cleaned_text, final_conf
+        except Exception as e:
+            logger.warning(f"[Tesseract] Aggressive Fehler: {e}")
+        
+        # ===== FALLBACK: PADDLEOCR (wenn konfiguriert) =====
+        if self.use_paddle_fallback:
+            logger.info("[PaddleOCR] Fallback zu PaddleOCR (Tesseract war erfolglos)")
             
-            if not extracted_text:
+            self._load_ocr()
+            if self.paddle_reader is not None:
+                try:
+                    text, paddle_confidence = self._extract_with_paddle(plate_image)
+                    
+                    if text and text.strip():
+                        cleaned_text = self._clean_text(text)
+                        final_conf = self._calculate_confidence(cleaned_text, text, paddle_confidence)
+                        
+                        logger.info(f"✓ [PaddleOCR] FALLBACK SUCCESS: '{cleaned_text}' (Conf: {final_conf:.2%})")
+                        
+                        # Cache
+                        self._recognition_cache[image_hash] = (cleaned_text, final_conf)
+                        if len(self._recognition_cache) > 100:
+                            keys_to_remove = list(self._recognition_cache.keys())[:-50]
+                            for key in keys_to_remove:
+                                del self._recognition_cache[key]
+                        
+                        return cleaned_text, final_conf
+                except Exception as e:
+                    logger.error(f"[PaddleOCR] Fehler: {e}")
+        
+        logger.warning("[OCR] ⚠️ Keine OCR-Engine konnte Text erkennen")
+        return "", 0.0
+    
+    def _extract_with_tesseract(self, image: np.ndarray) -> Tuple[str, float]:
+        """
+        Extrahiert Text mit Tesseract OCR
+        
+        Returns:
+            Tuple (text, confidence_score)
+        """
+        try:
+            if pytesseract is None:
+                logger.error("[Tesseract] pytesseract nicht verfügbar")
                 return "", 0.0
             
-            # Berechne Konfidenz basierend auf Format
-            confidence = self._calculate_confidence(self._clean_text(extracted_text), extracted_text)
+            # Tesseract Config für Kennzeichen-Erkennung
+            # --psm 6: Nehme an ein Block Text
+            # --oem 3: Test klassische + LSTM
+            # -c tessedit_char_whitelist: Nur Ziffern + Buchstaben
+            custom_config = r'--psm 6 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ0123456789'
             
-            return extracted_text, confidence
+            # Extrahiere mit Tesseract
+            text = pytesseract.image_to_string(image, config=custom_config, lang='eng')
+            
+            # Tesseract gibt keine native Confidence zurück, daher nutzen wir eine Heuristik
+            # Basierend auf Text-Länge und Zeichen-Vielfalt
+            text_clean = text.strip()
+            
+            if text_clean:
+                # Heuristik für Konfidenz
+                has_letters = any(c.isalpha() for c in text_clean)
+                has_digits = any(c.isdigit() for c in text_clean)
+                
+                # Idealerweise: 1 Buchstabe + 4 Ziffern = hohe Konfidenz
+                if has_letters and has_digits:
+                    confidence = 0.85
+                elif len(text_clean) >= 4:
+                    confidence = 0.75
+                else:
+                    confidence = 0.60
+                
+                logger.debug(f"[Tesseract] Text: '{text_clean}', Conf: {confidence:.2%}")
+                return text_clean, confidence
+            
+            return "", 0.0
             
         except Exception as e:
-            logger.error(f"[Tesseract] Fehler in Variante {variant}: {e}")
+            logger.error(f"[Tesseract] Fehler: {e}")
             return "", 0.0
     
-    def _easyocr_recognize(self, plate_image: np.ndarray) -> List[Tuple[str, float, str]]:
-        """EasyOCR Erkennung mit zwei Preprocessing-Varianten"""
-        results = []
+    def _extract_with_paddle(self, image: np.ndarray) -> Tuple[str, float]:
+        """
+        Extrahiert Text mit PaddleOCR (Fallback)
         
-        if not self.easyocr_reader:
-            return results
+        Returns:
+            Tuple (text, confidence_score)
+        """
+        if self.paddle_reader is None:
+            return "", 0.0
         
         try:
-            # Variante 1: Standard
-            logger.info("[EasyOCR] Variante 1: Standard")
-            processed_std = self._preprocess_image(plate_image, aggressive=False)
+            result = self.paddle_reader.ocr(image, cls=False)
             
-            # Konvertiere PIL zu OpenCV
-            if isinstance(processed_std, Image.Image):
-                processed_std = cv2.cvtColor(np.array(processed_std), cv2.COLOR_RGB2BGR)
+            if result and result[0]:
+                texts = [item[1][0] for item in result[0]]
+                confidences = [item[1][1] for item in result[0]]
+                
+                combined_text = "".join(texts).strip()
+                avg_confidence = float(np.mean(confidences)) if confidences else 0.0
+                
+                logger.debug(f"[PaddleOCR] Text: '{combined_text}', Conf: {avg_confidence:.2%}")
+                return combined_text, avg_confidence
             
-            text_1, conf_1 = self._extract_with_easyocr(processed_std)
-            if text_1:
-                results.append((text_1, conf_1, "EasyOCR-Standard"))
-            
-            # Variante 2: Aggressiv
-            logger.info("[EasyOCR] Variante 2: Aggressiv")
-            processed_agg = self._preprocess_image(plate_image, aggressive=True)
-            
-            if isinstance(processed_agg, Image.Image):
-                processed_agg = cv2.cvtColor(np.array(processed_agg), cv2.COLOR_RGB2BGR)
-            
-            text_2, conf_2 = self._extract_with_easyocr(processed_agg)
-            if text_2:
-                results.append((text_2, conf_2, "EasyOCR-Aggressiv"))
+            return "", 0.0
             
         except Exception as e:
-            logger.warning(f"[EasyOCR] Fehler: {e}")
-        
-        return results
-    
-    def _extract_with_easyocr(self, image: np.ndarray) -> Tuple[str, float]:
-        """Extrahiert Text mit EasyOCR"""
-        try:
-            # EasyOCR benötigt BGR OpenCV format
-            results = self.easyocr_reader.readtext(image, detail=1)
-            
-            if not results:
-                return "", 0.0
-            
-            # Kombiniere alle erkannten Texte
-            extracted_texts = []
-            confidences = []
-            
-            for (bbox, text, conf) in results:
-                extracted_texts.append(text)
-                confidences.append(conf)
-            
-            combined_text = " ".join(extracted_texts).strip()
-            avg_confidence = np.mean(confidences) if confidences else 0.0
-            
-            logger.info(f"[EasyOCR] Raw: '{combined_text}' (Conf: {avg_confidence:.2%})")
-            
-            return combined_text, avg_confidence
-            
-        except Exception as e:
-            logger.error(f"[EasyOCR] Fehler: {e}")
+            logger.error(f"[PaddleOCR] Fehler: {e}")
             return "", 0.0
     
-    def _is_valid_format(self, text: str) -> bool:
+    def _preprocess_image(self, image: np.ndarray, aggressive: bool = False) -> np.ndarray:
         """
-        Überprüft ob Text dem custom Kennzeichen-Format entspricht: A 1234
+        Optimiertes Preprocessing für Tesseract + RPi5
         
-        Args:
-            text: Zu überprüfender Text
-            
-        Returns:
-            True wenn Format gültig (A 1234), False sonst
-        """
-        if not text:
-            return False
-        
-        # Normalisiere zuerst
-        normalized = text.upper().strip()
-        
-        # Überprüfe Format: ein Buchstabe, Leerzeichen, 4 Ziffern
-        match = re.match(r'^([A-ZÄÖÜ])\s(\d{4})$', normalized)
-        
-        is_valid = match is not None
-        logger.info(f"[VALID] '{normalized}' -> Valid Format: {is_valid}")
-        
-        return is_valid
-    
-    def _is_invalid_plate_format(self, text: str) -> bool:
-        """
-        Überprüft ob Text die Form eines FALSCHEN Kennzeichens hat (z.B. A ABCD)
-        Also: 1 Buchstabe + Leerzeichen + 4 Buchstaben statt Ziffern
-        
-        Args:
-            text: Zu überprüfender Text
-            
-        Returns:
-            True wenn falsches Kennzeichen-Format erkannt, False sonst
-        """
-        if not text:
-            return False
-        
-        # Normalisiere zuerst
-        normalized = text.upper().strip()
-        
-        # Überprüfe falsches Format: ein Buchstabe, Leerzeichen, 4 Buchstaben (statt Ziffern!)
-        match = re.match(r'^([A-ZÄÖÜ])\s([A-ZÄÖÜ]{4})$', normalized)
-        
-        is_invalid = match is not None
-        if is_invalid:
-            logger.warning(f"❌ [INVALID PLATE] Erkanntes FALSCHES Kennzeichen: '{normalized}'")
-        
-        return is_invalid
-    
-    def _preprocess_image(self, image: np.ndarray, aggressive: bool = False) -> Image:
-        """
-        Bereitet Bild für OCR vor
+        Strategie:
         - Grayscale
-        - Kontrastverbesserung
-        - Rauschentfernung
+        - CLAHE (Kontrastverbesserung)
         - Scharfzeichnen
-        
-        Args:
-            image: OpenCV BGR Image
-            aggressive: True für aggressivere Kontrastverbesserung
-            
-        Returns:
-            PIL Image für Tesseract
+        - Optional: Binarisierung für aggressive Mode
         """
-        # Zu Grayscale konvertieren
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         else:
             gray = image
-        
-        # Rauschentfernung
-        denoised = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
         
         # Kontrastverbesserung mit CLAHE
         if aggressive:
-            # Aggressivere Einstellungen
-            clahe = cv2.createCLAHE(clipLimit=5.0, tileGridSize=(6, 6))
-            logger.info("[PREPROCESS] Verwende aggressive CLAHE")
-        else:
-            # Standard-Einstellungen
             clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            logger.debug("[PREPROCESS] Aggressive CLAHE (clip=3.0)")
+        else:
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            logger.debug("[PREPROCESS] Standard CLAHE (clip=2.0)")
         
-        enhanced = clahe.apply(denoised)
-        
-        # Morphologische Operationen zur Bereinigung
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        cleaned = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel, iterations=1)
+        enhanced = clahe.apply(gray)
         
         # Scharfzeichnen
-        kernel_sharpen = np.array([[-1, -1, -1],
-                                   [-1,  9, -1],
-                                   [-1, -1, -1]])
-        sharpened = cv2.filter2D(cleaned, -1, kernel_sharpen)
+        kernel_sharpen = np.array([[-1, -1, -1], [-1, 5, -1], [-1, -1, -1]])
+        sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
         
-        # Zu PIL konvertieren für Tesseract
-        pil_image = Image.fromarray(sharpened)
+        # Aggressive Mode: Binarisierung (schwarz/weiß)
+        if aggressive:
+            # Adaptiver Threshold für bessere Unterscheidung
+            binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                           cv2.THRESH_BINARY, 11, 2)
+            logger.debug("[PREPROCESS] Adaptive Threshold angewendet")
+            return binary
         
-        return pil_image
-    
-    def _preprocess_adaptive_threshold(self, image: np.ndarray) -> Image:
-        """
-        Preprocessing mit adaptivem Threshold (für schwierige Lichtverhältnisse)
-        
-        Args:
-            image: OpenCV BGR Image
-            
-        Returns:
-            PIL Image für Tesseract
-        """
-        # Zu Grayscale konvertieren
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = image
-        
-        # Rauschentfernung
-        denoised = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
-        
-        # Adaptiver Threshold
-        thresh = cv2.adaptiveThreshold(
-            denoised,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            11,
-            2
-        )
-        
-        logger.info("[PREPROCESS] Verwende Adaptive Threshold")
-        
-        # Zu PIL konvertieren für Tesseract
-        pil_image = Image.fromarray(thresh)
-        
-        return pil_image
-    
-    def _preprocess_for_character_distinction(self, image: np.ndarray) -> Image:
-        """
-        Spezielle Vorverarbeitung für bessere Zahlen/Buchstaben-Unterscheidung
-        Optimiert für Falsche Kennzeichen (A ABCD)
-        
-        Args:
-            image: OpenCV BGR Image
-            
-        Returns:
-            PIL Image für Tesseract
-        """
-        try:
-            # Zu Grayscale konvertieren
-            if len(image.shape) == 3:
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = image
-            
-            # Rauschentfernung (aggressiver für klare Kanten)
-            denoised = cv2.fastNlMeansDenoising(
-                gray, None, h=15, templateWindowSize=7, searchWindowSize=21
-            )
-            
-            # Kontrastverbesserung mit höherem clipLimit für klare Unterscheidung
-            clahe = cv2.createCLAHE(clipLimit=6.0, tileGridSize=(4, 4))
-            enhanced = clahe.apply(denoised)
-            
-            # Lokales Threshold für bessere Kanten-Erkennung
-            # Dies hilft, zwischen ähnlich geformten Zahlen und Buchstaben zu unterscheiden
-            block_size = 15
-            thresh = cv2.adaptiveThreshold(
-                enhanced,
-                255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY,
-                block_size,
-                3
-            )
-            
-            # Morphologische Operationen zur Verbesserung der Zeichenform
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            # Dilatation für Teile, die zu dünn sind
-            dilated = cv2.dilate(thresh, kernel, iterations=1)
-            # Erosion zum Entfernen von Rauschen
-            eroded = cv2.erode(dilated, kernel, iterations=1)
-            
-            # Scharfzeichnen für klare Kanten
-            kernel_sharpen = np.array([[-1, -1, -1],
-                                       [-1, 10, -1],
-                                       [-1, -1, -1]])
-            sharpened = cv2.filter2D(eroded, -1, kernel_sharpen)
-            
-            logger.info("[PREPROCESS] Character Distinction: Angewendet")
-            
-            # Zu PIL konvertieren für Tesseract
-            pil_image = Image.fromarray(sharpened)
-            
-            return pil_image
-        except Exception as e:
-            logger.error(f"[PREPROCESS] Fehler bei Character Distinction: {e}")
-            return self._preprocess_image(image, aggressive=True)
+        return sharpened
     
     def _clean_text(self, text: str) -> str:
         """
-        Bereinigt erkannten Text für Format: A 1234 ODER A ABCD (falsch)
-        - Entfernt ungültige Zeichen
-        - Normalisiert Leerzeichen
-        - Konvertiert zu Großbuchstaben
-        - Extrahiert sowohl gültige als auch ungültige Formate
+        Bereinigt und normalisiert erkannten Text
         
-        Args:
-            text: Roher OCR-Output
-            
-        Returns:
-            Gereinigter Text im Format "A 1234" oder "A ABCD"
+        Unterstützt:
+        - Gültiges Format: A 1234
+        - Variationen: A1234, A  1234, etc.
         """
+        if not text or not text.strip():
+            return ""
+        
+        text = text.upper().strip()
+        logger.debug(f"[CLEAN] Start: '{text}'")
+        
+        # Entferne ungültige Zeichen
+        text = re.sub(r'[^A-ZÄÖÜ0-9\s]', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        
         if not text:
             return ""
         
-        # Zu Großbuchstaben
-        text = text.upper().strip()
-        logger.info(f"[CLEAN] Schritt 1 (Upper): '{text}'")
-        
-        # Entferne Sonderzeichen außer Bindestrich und Leerzeichen
-        text = re.sub(r'[^A-ZÄÖÜ0-9\s\-]', '', text)
-        logger.info(f"[CLEAN] Schritt 2 (Remove special): '{text}'")
-        
-        # Mehrfache Leerzeichen/Bindestriche normalisieren
-        text = re.sub(r'[\s\-]+', ' ', text).strip()
-        logger.info(f"[CLEAN] Schritt 3 (Normalize spaces): '{text}'")
-        
-        # Suche nach exaktem Format: 1 Buchstabe + Leerzeichen + exakt 4 Zeichen
-        # Das sollte alle Varianten matchen:
-        # - A 1234 (gültig - 4 Ziffern)
-        # - A ABCD (ungültig - 4 Buchstaben)
-        # - A 5BCG (hybrid/falsch erkannt - gemischt)
-        match = re.search(r'([A-ZÄÖÜ])\s+([A-Z0-9]{4})', text)
-        
+        # Versuch 1: Mit Leerzeichen, exakt 4 Ziffern (gültiges Format: A 1234)
+        match = re.search(r'([A-ZÄÖÜ])\s*([0-9]{4})', text)
         if match:
-            letter = match.group(1)
-            chars = match.group(2)
-            
-            formatted = f"{letter} {chars}"
-            logger.info(f"[CLEAN] Formatiert (mit Leerzeichen): '{formatted}'")
-            return formatted
+            result = f"{match.group(1)} {match.group(2)}"
+            logger.debug(f"[CLEAN] Match (gültig): '{result}'")
+            return result
         
-        # ===== WICHTIG: FALLBACK FÜR FEHLENDE LEERZEICHEN =====
-        # OCR erkannte das Leerzeichen nicht → "A1234" statt "A 1234"
-        match_no_space = re.search(r'^([A-ZÄÖÜ])([A-Z0-9]{4})', text)
-        if match_no_space:
-            letter = match_no_space.group(1)
-            chars = match_no_space.group(2)
-            
-            formatted = f"{letter} {chars}"  # WICHTIG: Leerzeichen einfügen!
-            logger.info(f"[CLEAN] Formatiert (OCR ohne Leerzeichen): '{formatted}'")
-            return formatted
+        # Versuch 2: Ohne Leerzeichen, exakt 5 Zeichen (z.B. A1234)
+        text_no_space = text.replace(' ', '')
+        match = re.search(r'^([A-ZÄÖÜ])([0-9]{4})$', text_no_space)
+        if match:
+            result = f"{match.group(1)} {match.group(2)}"
+            logger.debug(f"[CLEAN] Match (kein Space): '{result}'")
+            return result
         
-        # Fallback: Falls exakt 4 Zeichen nicht funktioniert
-        # Versuche beliebig viele Zeichen und nimm die ersten 4
-        fallback_match = re.search(r'([A-ZÄÖÜ])\s+([A-Z0-9]+)', text)
-        if fallback_match:
-            letter = fallback_match.group(1)
-            chars = fallback_match.group(2)
-            
-            # Nimm exakt 4 Zeichen
-            first_four = chars[:4]
-            
-            formatted = f"{letter} {first_four}"
-            logger.info(f"[CLEAN] Formatiert (beliebig lange + Leerzeichen): '{formatted}'")
-            return formatted
+        # Versuch 3: Beliebiges Format mit mindestens 1 Buchstabe + 2 Ziffern
+        if len(text_no_space) >= 3:
+            result = text  # Gib bereinigten Text zurück
+            logger.debug(f"[CLEAN] Match (fallback): '{result}'")
+            return result
         
-        # Finaler Fallback: Buchstabe + 4+ Zeichen ohne Leerzeichen
-        fallback_no_space = re.search(r'^([A-ZÄÖÜ])([A-Z0-9]+)', text)
-        if fallback_no_space:
-            letter = fallback_no_space.group(1)
-            chars = fallback_no_space.group(2)[:4]  # Nimm erste 4
-            
-            formatted = f"{letter} {chars}"
-            logger.info(f"[CLEAN] Formatiert (beliebig lange, kein Leerzeichen): '{formatted}'")
-            return formatted
-        
-        logger.warning(f"[CLEAN] ⚠️ Konnte Format nicht extrahieren aus: '{text}'")
-        return text
+        logger.warning(f"[CLEAN] Text zu kurz: '{text}'")
+        return ""
     
-    def _calculate_confidence(self, cleaned_text: str, raw_text: str) -> float:
+    def _calculate_confidence(self, cleaned_text: str, raw_text: str, ocr_confidence: float) -> float:
         """
-        Berechnet Konfidenz des erkannten Textes
-        Optimiert für Unterscheidung gültig/ungültig
+        Berechnet finale Konfidenz basierend auf mehreren Faktoren
         
-        Berücksichtigt:
-        1. Format-Gültigkeit (A 1234 vs A ABCD)
-        2. Charakter-Analyse (Zahlen vs Buchstaben in Position)
-        3. Ähnlichkeit raw/cleaned
-        
-        Args:
-            cleaned_text: Gereinigter Text
-            raw_text: Roher OCR-Output
-            
-        Returns:
-            Confidence Score (0.0-1.0)
+        Faktoren:
+        - OCR native Konfidenz (50%)
+        - Format-Validität (30%)
+        - Text-Länge (20%)
         """
-        if not cleaned_text:
-            return 0.0
+        confidence = ocr_confidence * 0.5  # 50% basierend auf OCR
         
-        confidence = 0.3  # Base
-        
-        # 1. Format-Überprüfung
-        is_valid = self._is_valid_format(cleaned_text)
-        is_invalid = self._is_invalid_plate_format(cleaned_text)
-        
-        if is_valid:
-            confidence += 0.5  # Gültig = höhere Base-Konfidenz
-            logger.info(f"[CONF] '{cleaned_text}' ist GÜLTIG (A 1234)")
-        elif is_invalid:
-            confidence += 0.3  # Ungültig = mittlere Konfidenz
-            logger.info(f"[CONF] '{cleaned_text}' ist UNGÜLTIG (A ABCD)")
-        else:
-            confidence -= 0.1  # Unbekanntes Format = niedrig
-            logger.info(f"[CONF] '{cleaned_text}' Format UNBEKANNT")
-        
-        # 2. Character-by-Character Analyse
-        char_analysis = self._analyze_character_types(cleaned_text)
-        
-        # Wenn Format A XXXX, überprüfe ob X wirklich nur Zahlen/Buchstaben
-        if len(cleaned_text.replace(' ', '')) >= 5:
-            # Position 0: Ein Buchstabe
-            if cleaned_text[0].isalpha():
-                confidence += 0.05
-            else:
-                confidence -= 0.1
-            
-            # Positionen 2+: Sollten Zahlen oder Buchstaben sein
-            char_part = cleaned_text.split()[-1] if ' ' in cleaned_text else cleaned_text[1:]
-            
-            # Alle Positionen nach dem Leerzeichen sollten gleich sein (alle Zahlen ODER alle Buchstaben)
-            digits = sum(1 for c in char_part if c.isdigit())
-            letters = sum(1 for c in char_part if c.isalpha())
-            
-            # Wenn gemischt, ist es wahrscheinlich ein Fehler
-            if digits > 0 and letters > 0:
-                confidence -= 0.2
-                logger.info(f"[CONF] Gemischte Zeichen in '{char_part}' - Fehler wahrscheinlich")
-            elif digits == 4 or digits == len(char_part):
-                confidence += 0.1  # Alle Ziffern = gut
-            elif letters == 4 or letters == len(char_part):
-                confidence += 0.05  # Alle Buchstaben = möglich aber wahrscheinlich falsch
-        
-        # 3. Ähnlichkeit zwischen raw und cleaned
-        similarity = self._text_similarity(cleaned_text, raw_text)
-        if similarity > 0.8:
-            confidence += 0.1
-        elif similarity < 0.5:
-            confidence -= 0.05
-        
-        # 4. Länge-Check
-        char_count = len(cleaned_text.replace(' ', '').replace('-', ''))
-        if char_count == 5:  # Perfekt: A XXXX
-            confidence += 0.05
-        elif 4 <= char_count <= 6:
-            confidence += 0.02
+        # Format-Validität (30%)
+        if self._is_valid_format(cleaned_text):
+            confidence += 0.3
+        elif len(cleaned_text) >= 4:
+            confidence += 0.15
         else:
             confidence -= 0.1
         
-        # Auf 0.0-1.0 begrenzen
-        confidence = max(0.0, min(1.0, confidence))
+        # Text-Länge (20%)
+        if len(cleaned_text) == 5:  # Ideal: "A 1234"
+            confidence += 0.20
+        elif 4 <= len(cleaned_text) <= 6:
+            confidence += 0.10
+        else:
+            confidence -= 0.05
         
-        logger.info(f"[CONF] Final Confidence für '{cleaned_text}': {confidence:.2%}")
+        # Zeichen-Analyse
+        has_letters = any(c.isalpha() for c in cleaned_text)
+        has_digits = any(c.isdigit() for c in cleaned_text)
+        if has_letters and has_digits:
+            confidence += 0.05
         
-        return confidence
+        return max(0.0, min(1.0, confidence))
     
-    def _analyze_character_types(self, text: str) -> dict:
-        """
-        Analysiert Charaktertypen im Text
+    def _is_valid_format(self, text: str) -> bool:
+        """Prüft ob Text gültiges Kennzeichen-Format hat"""
+        if not text:
+            return False
+        normalized = text.upper().strip().replace(' ', '')
         
-        Returns:
-            Dict mit Statistics über Zahlen, Buchstaben, etc.
-        """
-        clean = text.replace(' ', '').replace('-', '')
+        # Pattern: 1-2 Buchstaben + 1-4 Ziffern (oder umgekehrt)
+        patterns = [
+            r'^[A-Z]{1}\d{4}$',  # A 1234
+            r'^[A-Z]{2}\d{3,4}$',  # AA 123 / AA 1234
+            r'^[A-Z]{1}\d{3,4}$',  # A 123 / A 1234
+        ]
+        
+        for pattern in patterns:
+            if re.match(pattern, normalized):
+                return True
+        
+        return False
+    
+    def get_statistics(self) -> dict:
+        """Gibt Statistiken zurück (wenn implementiert)"""
         return {
-            'digits': sum(1 for c in clean if c.isdigit()),
-            'letters': sum(1 for c in clean if c.isalpha()),
-            'special': len(clean) - sum(1 for c in clean if c.isalnum()),
-            'total': len(clean)
+            "cache_size": len(self._recognition_cache),
+            "tesseract_available": TESSERACT_AVAILABLE,
+            "paddleocr_available": PADDLEOCR_AVAILABLE,
         }
     
-    def _text_similarity(self, text1: str, text2: str) -> float:
-        """Berechnet Ähnlichkeit zwischen zwei Strings (0.0-1.0)"""
-        # Einfache Levenshtein-ähnlich Metrik
-        text1 = text1.replace(' ', '').replace('-', '')
-        text2 = text2.replace(' ', '').replace('-', '')
-        
-        if not text1 or not text2:
-            return 0.0
-        
-        matches = sum(c1 == c2 for c1, c2 in zip(text1, text2))
-        return matches / max(len(text1), len(text2))
-    
-    def extract_with_fallback(self, plate_image: np.ndarray,
-                             fallback_method: callable = None) -> Tuple[str, float]:
-        """
-        Extrahiert Text mit Fallback-Methode bei Fehler
-        
-        Args:
-            plate_image: Eingabebild
-            fallback_method: Fallback-Funktion wenn OCR fehlschlägt
-            
-        Returns:
-            Tuple (text, confidence)
-        """
-        text, confidence = self.extract_text(plate_image)
-        
-        if not text and fallback_method:
-            logger.info("OCR fehlgeschlagen, nutze Fallback...")
-            text, confidence = fallback_method(plate_image)
-        
-        return text, confidence
+    def reset_cache(self):
+        """Setzt den Cache zurück"""
+        self._recognition_cache.clear()
+        logger.info("Cache zurückgesetzt")

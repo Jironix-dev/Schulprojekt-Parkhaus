@@ -291,10 +291,11 @@ async function recognizePlate() {
         const data = await response.json();
         console.log("Recognition Response:", data); // Debug
         
-        if (data.success) {
+        // Zeige Ergebnisse wenn Kennzeichen erkannt wurde (gültig ODER ungültig)
+        if (data.detected_plate && data.detected_plate.trim() !== "") {
             displayRecognitionResult(data);
         } else {
-            showRecognitionError(data.error || "Erkennungsfehler");
+            showRecognitionError(data.error || "Keine Kennzeichen erkannt");
         }
     } catch (error) {
         console.error("Recognition Error:", error); // Debug
@@ -325,10 +326,11 @@ async function recognizeUpload(event) {
         
         const data = await response.json();
         
-        if (data.success) {
+        // Zeige Ergebnisse wenn Kennzeichen erkannt wurde (gültig ODER ungültig)
+        if (data.detected_plate && data.detected_plate.trim() !== "") {
             displayRecognitionResult(data);
         } else {
-            showRecognitionError(data.error || "Erkennungsfehler");
+            showRecognitionError(data.error || "Keine Kennzeichen erkannt");
         }
     } catch (error) {
         showRecognitionError("Fehler beim Upload: " + error.message);
@@ -350,7 +352,7 @@ function displayRecognitionResult(data) {
     if (plateElement) {
         // Zeige Platte an und markiere, wenn ungültig
         if (data.plate_valid === false) {
-            plateElement.innerText = `${data.detected_plate} ❌ FALSCH`;
+            plateElement.innerText = `${data.detected_plate} ❌`;
             plateElement.style.color = "#ff6b6b";
             console.log("Kennzeichen ist UNGÜLTIG"); // Debug
         } else if (data.plate_valid === true) {

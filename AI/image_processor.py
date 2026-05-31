@@ -6,9 +6,11 @@ Verarbeitet Bilder, erstellt Snapshots und konvertiert Formate
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import logging
 from datetime import datetime
+
+from .plate_detection_models import PlateRegion
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ class ImageProcessor:
     - Format-Konvertierung
     """
     
-    def __init__(self, output_dir: str = None):
+    def __init__(self, output_dir: Optional[str] = None):
         """
         Initialisiert ImageProcessor
         
@@ -44,7 +46,7 @@ class ImageProcessor:
             dir_path.mkdir(parents=True, exist_ok=True)
             logger.debug(f"✓ Verzeichnis: {dir_path}")
     
-    def crop_region(self, frame: np.ndarray, region: 'PlateRegion',
+    def crop_region(self, frame: np.ndarray, region: PlateRegion,
                    padding: int = 0) -> Optional[np.ndarray]:
         """
         Schneidet eine Region aus dem Frame aus
@@ -161,8 +163,8 @@ class ImageProcessor:
             logger.error(f"Fehler beim Speichern des annotierten Frames: {e}")
             return None
     
-    def resize_image(self, image: np.ndarray, width: int = None,
-                    height: int = None, keep_aspect: bool = True) -> np.ndarray:
+    def resize_image(self, image: np.ndarray, width: Optional[int] = None,
+                    height: Optional[int] = None, keep_aspect: bool = True) -> np.ndarray:
         """
         Ändert Bildgröße
         
@@ -187,6 +189,10 @@ class ImageProcessor:
             elif height is not None and width is None:
                 aspect = w / h
                 width = int(height * aspect)
+        
+        # Typ-Guard: Stelle sicher dass width und height int sind
+        if width is None or height is None:
+            return image
         
         return cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
     
@@ -245,7 +251,7 @@ class ImageProcessor:
         """
         try:
             if not images:
-                return None
+                return np.zeros((300, 600, 3), dtype=np.uint8)
             
             # Bilder auf gleiche Größe skalieren
             target_size = (300, 300)
@@ -281,4 +287,4 @@ class ImageProcessor:
             return grid
         except Exception as e:
             logger.error(f"Fehler beim Grid-Erstellen: {e}")
-            return None
+            return np.zeros((300, 600, 3), dtype=np.uint8)

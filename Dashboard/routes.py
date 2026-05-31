@@ -309,11 +309,12 @@ async def detect_plate_from_upload(file: UploadFile = File(...)):
         plate_service = PlateRecognitionService.get_instance()
         result = plate_service.recognize_frame(frame)
         
-        # Speichere Erkennung falls erfolgreich
-        if result["success"]:
+        # Speichere Erkennung (gültig ODER ungültig)
+        if result.get("detected_plate"):  # Wenn etwas erkannt wurde
+            status = "✓ GÜLTIG" if result["success"] else "⚠️ UNGÜLTIG"
             logs.append({
                 "time": time.strftime("%H:%M:%S"),
-                "event": f"Kennzeichen erkannt: {result['detected_plate']} (Conf: {result['combined_confidence']:.2%})"
+                "event": f"{status}: {result['detected_plate']} (Conf: {result.get('combined_confidence', 0):.2%})"
             })
         
         return JSONResponse(result)

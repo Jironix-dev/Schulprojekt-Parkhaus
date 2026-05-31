@@ -44,6 +44,7 @@ class LiveFeedHandler:
         self.last_frame_time = 0.0
         self.frame_count = 0
         self.is_usb_camera = False
+        self.capture_thread: Optional[threading.Thread] = None
         
         self._init_fallback_frame()
         self._init_camera()
@@ -136,8 +137,8 @@ class LiveFeedHandler:
     def _start_capture_thread(self) -> None:
         """Starte Background-Thread für USB-Kameras"""
         self.running = True
-        thread = threading.Thread(target=self._capture_loop, daemon=True)
-        thread.start()
+        self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self.capture_thread.start()
     
     def _capture_loop(self) -> None:
         """Background-Thread: USB-Capture + JPEG Encoding"""

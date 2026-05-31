@@ -1,21 +1,24 @@
 """
 Kennzeichen-Erkennungssystem
-Integriert YOLO für Kennzeichen-Lokalisierung mit OCR für Text-Extraktion
+Integriert YOLO (Ultralytics) für optimierte Kennzeichen-Lokalisierung mit OCR für Text-Extraktion
+Vereinfachte Version für bessere Stabilität
 """
 
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 import logging
 import re
-from dataclasses import dataclass
+import time
 from datetime import datetime
 
+# Ultralytics YOLO
 try:
     from ultralytics import YOLO
     YOLO_AVAILABLE = True
 except ImportError:
+    YOLO = None  # type: ignore
     YOLO_AVAILABLE = False
 
 from .image_processor import ImageProcessor
@@ -26,70 +29,118 @@ from .plate_detection_models import PlateDetectionResult, PlateRegion
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# YOLO Modell Konfiguration
+YOLO_CONF_THRESHOLD = 0.45
+YOLO_IOU_THRESHOLD = 0.5
+MODEL_PATH = Path(__file__).parent / "YOLO-Modell" / "train" / "weights" / "best.pt"
+
 
 class PlateRecognizer:
     """
-    Hauptklasse für Kennzeichen-Erkennung
-    Nutzt YOLO für Lokalisierung und OCR für Text-Erkennung
+    Kennzeichen-Erkennungssystem basierend auf YOLO + OCR
+    Nutzt Ultralytics YOLO für robuste und schnelle Erkennung
     """
     
-    def __init__(self, model_path: str = None, conf_threshold: float = 0.5):
+    def __init__(self, model_path: Optional[str] = None):
         """
-        Initialisiert den PlateRecognizer
+        Initialisiert PlateRecognizer
         
         Args:
-            model_path: Pfad zum YOLO-Modell (best.pt). Wenn None, nutze default-Pfad
-            conf_threshold: Konfidenz-Schwellenwert für Detektionen (0.0-1.0)
+            model_path: Pfad zum YOLO best.pt Modell. Wenn None, nutze default
         """
-        self.conf_threshold = conf_threshold
+        if not YOLO_AVAILABLE:
+            logger.error("Ultralytics YOLO nicht installiert! Führe aus: pip install ultralytics")
+            self.model = None
+            return
+        
+        # Verwende übergebenen Pfad oder default
+        if model_path is None:
+            model_path = str(MODEL_PATH)
+        
+        self.model_path = model_path
         self.model = None
         self.image_processor = ImageProcessor()
         self.ocr_handler = OCRHandler()
-        self.device = "cpu"  # oder "cuda" für GPU
+        self.recognition_count = 0
+        self.success_count = 0
         
-        # Standard-Modell-Pfad wenn nicht angegeben
-        if model_path is None:
-            model_path = str(Path(__file__).parent / "YOLO-Modell" / "train" / "weights" / "best.pt")
-        
-        self._load_model(model_path)
+        self._load_model()
     
-    def _load_model(self, model_path: str) -> None:
-        """Lädt das YOLO-Modell"""
-        if not YOLO_AVAILABLE:
-            logger.error("YOLO nicht installiert! Installiere: pip install ultralytics")
-            return
+    def _load_model(self) -> bool:
+        """
+        Lädt das YOLO Modell
+        
+        Returns:
+            True wenn erfolgreich, False sonst
+        """
+        if not YOLO_AVAILABLE or YOLO is None:
+            logger.error("YOLO nicht verfügbar!")
+            return False
         
         try:
-            model_path = Path(model_path)
-            if not model_path.exists():
-                logger.error(f"Modell nicht gefunden: {model_path}")
-                return
+            model_path_obj = Path(self.model_path)
             
-            self.model = YOLO(str(model_path))
-            logger.info(f"✓ YOLO-Modell geladen: {model_path}")
+            # Falls Modell nicht existiert, versuche es zu laden/herunterladen
+            if not model_path_obj.exists():
+                logger.warning(f"Modell nicht gefunden: {self.model_path}")
+                logger.info("Versuche Standard-YOLO Modell zu laden...")
+                
+                # Fallback: Lade ein Standard-YOLO Modell (wird heruntergeladen)
+                # Versuche, das beste Modell zu laden (wird von Ultralytics verwaltet)
+                try:
+                    self.model = YOLO('yolov8n.pt')  # Nano-Version für RPi
+                    logger.info("✓ Standard YOLO8n Modell geladen (heruntergeladen)")
+                except:
+                    # Noch fallback: Lade von pretrained Punkt
+                    self.model = YOLO('yolov8s.pt')  # Small version
+                    logger.info("✓ Standard YOLO8s Modell geladen")
+            else:
+                logger.info(f"Lade YOLO Modell: {self.model_path}")
+                self.model = YOLO(self.model_path)
+                logger.info("✓ YOLO Modell erfolgreich geladen (custom)")
+            
+            logger.info(f"✓ YOLO Modell bereit")
+            logger.info(f"  - Device: {self.model.device}")
+            logger.info(f"  - Confidence Threshold: {YOLO_CONF_THRESHOLD}")
+            
+            return True
+            
         except Exception as e:
-            logger.error(f"Fehler beim Laden des Modells: {e}")
+            logger.error(f"Fehler beim Laden des YOLO-Modells: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def detect_plate_in_frame(self, frame: np.ndarray) -> PlateDetectionResult:
         """
-        Erkennt Kennzeichen im übergebenen Frame
+        Erkennt Kennzeichen in einem Frame
         
         Args:
-            frame: OpenCV frame (BGR)
+            frame: OpenCV BGR Frame
             
         Returns:
-            PlateDetectionResult mit allen Erkennungsergebnissen
+            PlateDetectionResult mit allen Erkenntnis-Daten
         """
-        if self.model is None:
-            logger.warning("Modell nicht geladen")
-            return PlateDetectionResult(
-                success=False,
-                error="Modell nicht geladen"
-            )
+        self.recognition_count += 1
+        timing_start = time.time()
         
         try:
-            # YOLO Inferenz
-            results = self.model(frame, conf=self.conf_threshold, verbose=False)
+            if self.model is None:
+                return PlateDetectionResult(
+                    success=False,
+                    error="YOLO Modell nicht geladen"
+                )
+            
+            # ===== YOLO Detection =====
+            yolo_start = time.time()
+            results = self.model(
+                frame,
+                conf=YOLO_CONF_THRESHOLD,
+                iou=YOLO_IOU_THRESHOLD,
+                verbose=False
+            )
+            yolo_time = time.time() - yolo_start
+            logger.debug(f"⏱️ YOLO Inference: {yolo_time*1000:.1f}ms")
             
             if not results or len(results) == 0:
                 return PlateDetectionResult(
@@ -97,158 +148,138 @@ class PlateRecognizer:
                     error="Keine Kennzeichen erkannt"
                 )
             
-            # Verarbeite erste Detection
-            detections = results[0]
+            result = results[0]
             
-            if len(detections.boxes) == 0:
+            # Überprüfe ob Detektionen vorhanden sind
+            if result.boxes is None or len(result.boxes) == 0:
                 return PlateDetectionResult(
                     success=False,
                     error="Keine Kennzeichen erkannt"
                 )
             
-            # Beste Detection (höchste Konfidenz)
-            best_detection = self._get_best_detection(detections)
-            if best_detection is None:
-                return PlateDetectionResult(
-                    success=False,
-                    error="Keine valide Detection"
-                )
+            # Nutze die erste (beste) Detection
+            box = result.boxes[0]
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            yolo_conf = float(box.conf[0])
             
-            confidence, box = best_detection
-            x1, y1, x2, y2 = self._extract_coordinates(box)
+            logger.debug(f"YOLO Detection: conf={yolo_conf:.3f}, box=({x1},{y1},{x2},{y2})")
             
-            # Ausschneiden des Kennzeichens
+            # Schneide Kennzeichen aus
             plate_region = PlateRegion(
-                x1=int(x1), y1=int(y1),
-                x2=int(x2), y2=int(y2),
-                confidence=float(confidence)
+                x1=x1, y1=y1, x2=x2, y2=y2,
+                confidence=yolo_conf
             )
             
+            crop_start = time.time()
             plate_image = self.image_processor.crop_region(frame, plate_region)
+            crop_time = time.time() - crop_start
+            logger.debug(f"⏱️ Crop: {crop_time*1000:.1f}ms")
             
             if plate_image is None or plate_image.size == 0:
                 return PlateDetectionResult(
                     success=False,
-                    error="Kennzeichen-Ausschnitt ungültig"
+                    error="Kennzeichen konnte nicht ausgeschnitten werden"
                 )
             
-            # OCR auf ausgeschnittenem Kennzeichen
-            detected_text, ocr_confidence = self.ocr_handler.extract_text(plate_image)
+            # ===== OCR Extraktion =====
+            ocr_start = time.time()
+            text, ocr_conf = self.ocr_handler.extract_text(plate_image)
+            ocr_time = time.time() - ocr_start
+            logger.debug(f"⏱️ OCR: {ocr_time*1000:.1f}ms")
+            
+            # Falls OCR nichts erkannt hat, fehlerhafte Rückgabe
+            if not text or text.strip() == "":
+                return PlateDetectionResult(
+                    success=False,
+                    error="Kennzeichen konnte nicht erkannt werden (OCR fehlgeschlagen)"
+                )
+            
+            # Validiere Kennzeichen-Format
+            valid = self._validate_plate_format(text)
             
             # Erstelle annotiertes Bild
             annotated_frame = frame.copy()
-            annotated_frame = cv2.rectangle(
-                annotated_frame,
-                (plate_region.x1, plate_region.y1),
-                (plate_region.x2, plate_region.y2),
-                (0, 255, 0),  # Grüner Rahmen
-                2
-            )
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(annotated_frame, text, (x1, max(y1 - 10, 20)),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
             
-            # Konfidenz-Text hinzufügen
-            conf_text = f"Plate: {plate_region.confidence:.2%} | OCR: {ocr_confidence:.2%}"
-            annotated_frame = cv2.putText(
-                annotated_frame,
-                conf_text,
-                (plate_region.x1, max(plate_region.y1 - 10, 20)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 0),
-                2
-            )
+            # Gesamt-Zeit
+            total_time = time.time() - timing_start
+            logger.info(f"⏱️ TOTAL: {total_time*1000:.1f}ms (YOLO: {yolo_time*1000:.1f}ms, OCR: {ocr_time*1000:.1f}ms)")
             
-            # Überprüfe ob Kennzeichen gültig oder ungültig ist
-            plate_valid = self._is_valid_plate(detected_text)
+            if valid:
+                self.success_count += 1
+                logger.info(f"✓ Kennzeichen erkannt: {text} (YOLO: {yolo_conf:.2%}, OCR: {ocr_conf:.2%}, Valid: {valid})")
+            else:
+                logger.info(f"⚠️  Ungültiges Kennzeichen erkannt: {text} (YOLO: {yolo_conf:.2%}, OCR: {ocr_conf:.2%})")
             
-            result = PlateDetectionResult(
-                success=True,
-                detected_plate=detected_text,
-                plate_confidence=float(confidence),
-                ocr_confidence=ocr_confidence,
+            return PlateDetectionResult(
+                success=valid,
+                detected_plate=text,
+                plate_confidence=yolo_conf,
+                ocr_confidence=ocr_conf,
                 plate_region=plate_region,
                 plate_image=plate_image,
                 annotated_frame=annotated_frame,
                 detection_timestamp=datetime.now().isoformat(),
-                plate_valid=plate_valid
+                plate_valid=valid,
+                error="" if valid else "Kennzeichen-Format ungültig"
             )
-            
-            logger.info(f"✓ Kennzeichen erkannt: {detected_text} (Conf: {confidence:.2%}, Valid: {plate_valid})")
-            return result
             
         except Exception as e:
-            logger.error(f"Fehler bei Erkennung: {e}")
+            logger.error(f"Fehler bei Kennzeichen-Erkennung: {e}")
+            import traceback
+            traceback.print_exc()
+            
             return PlateDetectionResult(
                 success=False,
-                error=f"Erkennungsfehler: {str(e)}"
+                error=str(e)
             )
     
-    def _get_best_detection(self, detections) -> Optional[Tuple[float, Any]]:
-        """Wählt die beste (höchste Konfidenz) Detection"""
-        if len(detections.boxes) == 0:
-            return None
-        
-        best_conf = 0
-        best_box = None
-        
-        for box in detections.boxes:
-            conf = float(box.conf[0])
-            if conf > best_conf:
-                best_conf = conf
-                best_box = box
-        
-        return (best_conf, best_box) if best_box is not None else None
-    
-    def _extract_coordinates(self, box) -> Tuple[float, float, float, float]:
-        """Extrahiert Koordinaten aus YOLO Box"""
-        xyxy = box.xyxy[0].cpu().numpy()
-        return float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
-    
-    def _is_valid_plate(self, detected_plate: str) -> bool:
+    def _validate_plate_format(self, text: str) -> bool:
         """
-        Überprüft ob erkanntes Kennzeichen gültig oder ungültig ist
-        
-        Gültig: A 1234 (Buchstabe + Leerzeichen + 4 Ziffern)
-        Ungültig: A ABCD (Buchstabe + Leerzeichen + 4 Buchstaben)
-        
-        Args:
-            detected_plate: Erkannter Text
-            
-        Returns:
-            True wenn gültig (nur Zahlen im Nummernblock), False wenn ungültig (Buchstaben statt Zahlen)
+        Validiert Kennzeichen-Format (Deutsch und vereinfacht)
+        Unterstützt:
+        - Deutsches Format: [1-2 Buchstaben] [1-4 Ziffern] [1-2 Buchstaben]
+        - Vereinfachtes Format: [1 Buchstabe] [4 Ziffern] (z.B. "R 7539" -> "R7539")
+        z.B.: "A 1234 B" oder "AB 12 CD" oder "R7539"
         """
-        if not detected_plate:
+        if not text or len(text) < 2:
             return False
         
-        normalized = detected_plate.upper().strip()
+        # Entferne Leerzeichen und Bindestriche
+        clean_text = text.upper().replace(" ", "").replace("-", "")
         
-        # Überprüfe gültiges Format: A 1234
-        valid_match = re.match(r'^([A-ZÄÖÜ])\s(\d{4})$', normalized)
-        if valid_match:
-            logger.info(f"✓ [VALID] Kennzeichen: '{normalized}'")
-            return True
+        # Kennzeichen-Patterns
+        patterns = [
+            r'^[A-Z]{2}\d{1,3}[A-Z]{1,2}$',  # AA 1234 B (Standard-Deutsch)
+            r'^[A-Z]{1,2}\d{1,4}[A-Z]{1,2}$',  # A 123 BC (Deutsch variabel)
+            r'^[A-Z]{1,3}\d{1,3}[A-Z]{1,2}$',  # ABC 123 DE (Deutsch erweitert)
+            r'^[A-Z]{1}\d{4}$',                # R7539 (Vereinfachtes Format)
+        ]
         
-        # Überprüfe ungültiges Format: A ABCD
-        invalid_match = re.match(r'^([A-ZÄÖÜ])\s([A-ZÄÖÜ]{4})$', normalized)
-        if invalid_match:
-            logger.warning(f"❌ [INVALID] Falsches Kennzeichen: '{normalized}'")
-            return False
+        for pattern in patterns:
+            if re.match(pattern, clean_text):
+                return True
         
-        # Unbekanntes Format
-        logger.warning(f"⚠️ [UNKNOWN] Unbekanntes Format: '{normalized}'")
         return False
     
-    def process_frame_batch(self, frames: list) -> list:
+    def get_statistics(self) -> Dict[str, Any]:
         """
-        Verarbeitet mehrere Frames hintereinander
+        Gibt Erkennungs-Statistiken zurück
+        """
+        success_rate = (self.success_count / self.recognition_count * 100) if self.recognition_count > 0 else 0
         
-        Args:
-            frames: Liste von OpenCV Frames
-            
-        Returns:
-            Liste von PlateDetectionResult
+        return {
+            "total_recognitions": self.recognition_count,
+            "successful_recognitions": self.success_count,
+            "success_rate": round(success_rate, 2)
+        }
+    
+    def reset_statistics(self):
         """
-        results = []
-        for frame in frames:
-            result = self.detect_plate_in_frame(frame)
-            results.append(result)
-        return results
+        Setzt Statistiken zurück
+        """
+        self.recognition_count = 0
+        self.success_count = 0
+        logger.info("Statistiken zurückgesetzt")

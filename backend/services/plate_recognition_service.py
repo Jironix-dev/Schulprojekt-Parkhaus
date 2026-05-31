@@ -37,14 +37,22 @@ class PlateRecognitionService:
         return cls._instance
     
     def _initialize(self) -> None:
-        """Initialisiert den Plate Recognizer"""
+        """Initialisiert den Plate Recognizer und wärmt OCR vor"""
         try:
             logger.info("Initialisiere PlateRecognitionService...")
             self._recognizer = PlateRecognizer()
             if self._recognizer.model is None:
                 logger.warning("YOLO-Modell konnte nicht geladen werden")
             else:
-                logger.info("✓ PlateRecognitionService initialisiert")
+                logger.info("✓ YOLO-Modell geladen")
+            
+            # Wärme OCR-Handler vor (wichtig für Performance!)
+            if self._recognizer and self._recognizer.ocr_handler:
+                logger.info("Wärme OCR-Handler vor (EasyOCR laden)...")
+                self._recognizer.ocr_handler._load_ocr()
+                logger.info("✓ OCR-Handler vorgewärmt - Erste Erkennung wird jetzt schnell!")
+            
+            logger.info("✓ PlateRecognitionService vollständig initialisiert")
         except Exception as e:
             logger.error(f"Fehler bei Initialisierung: {e}")
             self._recognizer = None
@@ -91,7 +99,11 @@ class PlateRecognitionService:
     
     def _build_response(self, result: PlateDetectionResult, 
                         original_frame: np.ndarray) -> Dict[str, Any]:
-        """Erstellt Response-Dictionary mit Base64-kodierten Bildern"""
+        """Erstellt Response-Dictionary mit Base64-kodierten Bildern
+        
+        Wichtig: Zeigt ALL Daten auch wenn Kennzeichen ungültig ist!
+        """
+        # Basis-Response mit allen Daten, ob gültig oder ungültig
         response = {
             "success": result.success,
             "detected_plate": result.detected_plate,
@@ -99,24 +111,34 @@ class PlateRecognitionService:
             "ocr_confidence": round(result.ocr_confidence, 4),
             "combined_confidence": round(result.get_combined_confidence(), 4),
             "timestamp": result.detection_timestamp,
-            "error": result.error
+            "error": result.error,
+            "plate_valid": result.plate_valid
         }
         
-        if result.success:
+        # WICHTIG: Zeige Bilder wenn Kennzeichen erkannt wurde (gültig ODER ungültig!)
+        if result.detected_plate and result.detected_plate.strip():
+            logger.debug(f"[SERVICE] Baue Response für: '{result.detected_plate}' (valid={result.plate_valid})")
+            
             # Original-Snapshot (ganzes Fahrzeug)
-            response["vehicle_snapshot"] = self._frame_to_base64(original_frame)
+            if original_frame is not None and original_frame.size > 0:
+                response["vehicle_snapshot"] = self._frame_to_base64(original_frame)
             
             # Ausgeschnittenes Kennzeichen
-            if result.plate_image is not None:
+            if result.plate_image is not None and result.plate_image.size > 0:
                 response["plate_image"] = self._frame_to_base64(result.plate_image)
+                logger.debug(f"[SERVICE] plate_image hinzugefügt")
             
             # Annotiertes Frame mit Bounding Box
-            if result.annotated_frame is not None:
+            if result.annotated_frame is not None and result.annotated_frame.size > 0:
                 response["annotated_frame"] = self._frame_to_base64(result.annotated_frame)
+                logger.debug(f"[SERVICE] annotated_frame hinzugefügt")
             
             # Region-Daten
             if result.plate_region:
                 response["plate_region"] = result.plate_region.to_dict()
+                logger.debug(f"[SERVICE] plate_region hinzugefügt")
+        else:
+            logger.debug(f"[SERVICE] Keine Kennzeichen erkannt oder leer")
         
         return response
     
