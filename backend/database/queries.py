@@ -100,7 +100,7 @@ class ParkingQueries:
     """Abfragen für Parkplatz-Verwaltung"""
     
     @staticmethod
-    def create_session(vehicle_id: int, entry_image_id: Optional[int] = None) -> int:
+    def create_session(vehicle_id: int, entry_image_id: Optional[int] = None) -> Optional[int]:
         """Erstellt neue Parkplatz-Session"""
         cursor = db.get_cursor()
         cursor.execute(
@@ -210,7 +210,7 @@ class ImageQueries:
     
     @staticmethod
     def add_image(image_path: str, image_type: str, 
-                  detected_plate: str = '', confidence: float = 0.0) -> int:
+                  detected_plate: str = '', confidence: float = 0.0) -> Optional[int]:
         """Fügt neues Bild hinzu"""
         cursor = db.get_cursor()
         
@@ -230,7 +230,7 @@ class ImageQueries:
         return cursor.lastrowid
     
     @staticmethod
-    def add_detection(image_id: int, detected_plate: str, raw_text: str, confidence: float) -> int:
+    def add_detection(image_id: int, detected_plate: str, raw_text: str, confidence: float) -> Optional[int]:
         """Fügt Kennzeichen-Erkennung hinzu"""
         cursor = db.get_cursor()
         

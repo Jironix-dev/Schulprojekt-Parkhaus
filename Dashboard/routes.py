@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, File, UploadFile
+from fastapi import APIRouter, Request, File, UploadFile, Body
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 import time
 from pathlib import Path
@@ -164,27 +164,79 @@ def get_status_widget():
         return {"error": str(e), "vehicles": []}
 
 
-@router.get("/api/widget/known-vehicles")
-def get_known_vehicles_widget():
-    """Widget: Alle bekannten Kennzeichen"""
+@router.get("/api/widget/dauerparker")
+def get_dauerparker_widget():
+    """Widget: Dauerparker (manuell eingegebene Kennzeichen)"""
     try:
-        vehicles = DashboardService.get_known_vehicles()
+        dauerparker = DashboardService.get_dauerparker()
         return {
-            "title": "Bekannte Kennzeichen",
+            "title": "Dauerparker",
             "vehicles": [
                 {
                     'license_plate': v['license_plate'],
-                    'status': v['status'],
-                    'first_seen_at': v['first_seen_at'],
-                    'last_seen_at': v['last_seen_at'],
-                    'total_sessions': v['total_sessions']
+                    'registered_at': v['registered_at'],
+                    'notes': v['notes']
                 }
-                for v in vehicles
+                for v in dauerparker
             ],
-            "count": len(vehicles)
+            "count": len(dauerparker)
         }
     except Exception as e:
         return {"error": str(e), "vehicles": []}
+
+
+@router.post("/api/widget/add-dauerparker")
+def add_dauerparker(request_body: dict = Body(...)):
+    """Endpunkt: Neuen Dauerparker hinzufügen"""
+    try:
+        license_plate = request_body.get('license_plate', '').strip().upper()
+        
+        success, message = DashboardService.add_dauerparker(license_plate)
+        
+        return {
+            "success": success,
+            "message": message,
+            "license_plate": license_plate if success else None
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Fehler: {str(e)}"
+        }
+
+
+@router.post("/api/widget/delete-dauerparker")
+def delete_dauerparker(request_body: dict = Body(...)):
+    """Endpunkt: Dauerparker löschen"""
+    try:
+        license_plate = request_body.get('license_plate', '').strip().upper()
+        
+        success, message = DashboardService.delete_dauerparker(license_plate)
+        
+        return {
+            "success": success,
+            "message": message,
+            "license_plate": license_plate if success else None
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Fehler: {str(e)}"
+        }
+
+
+@router.get("/api/widget/detection-protocol")
+def get_detection_protocol():
+    """Widget: Erkennungsprotokoll - alle erkannten Kennzeichen"""
+    try:
+        detections = DashboardService.get_detection_protocol(limit=100)
+        return {
+            "title": "Erkennungsprotokoll",
+            "detections": detections,
+            "count": len(detections)
+        }
+    except Exception as e:
+        return {"error": str(e), "detections": [], "count": 0}
 
 
 # ==================== Live-Feed Endpoints ====================
@@ -270,6 +322,18 @@ async def detect_plate_from_camera():
         plate_service = PlateRecognitionService.get_instance()
         result = plate_service.recognize_frame(frame)
         
+        # Speichere Entry Request wenn gültiges Kennzeichen erkannt wurde
+        if result.get("success") and result.get("detected_plate"):
+            license_plate = result["detected_plate"].strip()
+            ocr_confidence = result.get("ocr_confidence", 0.0)
+            
+            success, message = DashboardService.save_entry_request(license_plate, ocr_confidence)
+            if success:
+                logs.append({
+                    "time": time.strftime("%H:%M:%S"),
+                    "event": f"Entry Request: {license_plate} {message}"
+                })
+        
         return JSONResponse(result)
         
     except Exception as e:
@@ -309,12 +373,23 @@ async def detect_plate_from_upload(file: UploadFile = File(...)):
         plate_service = PlateRecognitionService.get_instance()
         result = plate_service.recognize_frame(frame)
         
-        # Speichere Erkennung (gültig ODER ungültig)
-        if result.get("detected_plate"):  # Wenn etwas erkannt wurde
-            status = "✓ GÜLTIG" if result["success"] else "⚠️ UNGÜLTIG"
+        # Speichere Entry Request wenn gültiges Kennzeichen erkannt wurde
+        if result.get("success") and result.get("detected_plate"):
+            license_plate = result["detected_plate"].strip()
+            ocr_confidence = result.get("ocr_confidence", 0.0)
+            
+            success, message = DashboardService.save_entry_request(license_plate, ocr_confidence)
+            
+            status = "✓ GÜLTIG" if success else "⚠️ UNGÜLTIG"
             logs.append({
                 "time": time.strftime("%H:%M:%S"),
-                "event": f"{status}: {result['detected_plate']} (Conf: {result.get('combined_confidence', 0):.2%})"
+                "event": f"{status}: {license_plate} - {message}"
+            })
+        elif result.get("detected_plate"):
+            # Ungültiges Kennzeichen erkannt
+            logs.append({
+                "time": time.strftime("%H:%M:%S"),
+                "event": f"⚠️ UNGÜLTIGES FORMAT: {result.get('detected_plate')} (Conf: {result.get('combined_confidence', 0):.2%})"
             })
         
         return JSONResponse(result)
@@ -377,4 +452,93 @@ def reset_recognition_statistics():
         
         return {"status": "success", "message": "Statistiken zurückgesetzt"}
     except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/api/entry/save-request")
+def save_entry_request(data: dict = Body(...)):
+    """
+    Speichert einen Entry Request wenn OCR ein gültiges Kennzeichen erkennt.
+    
+    Body:
+        {
+            "license_plate": "A 1234",
+            "ocr_confidence": 0.95
+        }
+    """
+    try:
+        license_plate = data.get("license_plate", "").strip()
+        ocr_confidence = data.get("ocr_confidence", 0.0)
+        
+        success, message = DashboardService.save_entry_request(license_plate, ocr_confidence)
+        
+        logs.append({
+            "time": time.strftime("%H:%M:%S"),
+            "event": f"Entry Request: {license_plate} - {message}"
+        })
+        
+        return {
+            "status": "success" if success else "error",
+            "message": message
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/api/entry/requests")
+def get_entry_requests(limit: int = 50):
+    """
+    Ruft alle Entry Requests ab (erkannte Kennzeichen für Genehmigung).
+    """
+    try:
+        requests = DashboardService.get_entry_requests(limit)
+        return {
+            "status": "success",
+            "data": requests,
+            "count": len(requests)
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/api/entry/approve/{request_id}")
+def approve_entry(request_id: int):
+    """
+    Genehmigt einen Entry Request (Auto darf einfahren).
+    """
+    try:
+        success, message = DashboardService.approve_entry_request(request_id)
+        
+        logs.append({
+            "time": time.strftime("%H:%M:%S"),
+            "event": f"Entry #{request_id} genehmigt"
+        })
+        
+        return {
+            "status": "success" if success else "error",
+            "message": message
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/api/entry/reject/{request_id}")
+def reject_entry(request_id: int):
+    """
+    Lehnt einen Entry Request ab (Auto darf NICHT einfahren).
+    """
+    try:
+        success, message = DashboardService.reject_entry_request(request_id)
+        
+        logs.append({
+            "time": time.strftime("%H:%M:%S"),
+            "event": f"Entry #{request_id} abgelehnt"
+        })
+        
+        return {
+            "status": "success" if success else "error",
+            "message": message
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
         return {"status": "error", "error": str(e)}

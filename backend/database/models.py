@@ -83,6 +83,19 @@ SCHEMA = {
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
         )
+    ''',
+    
+    'entry_requests': '''
+        CREATE TABLE IF NOT EXISTS entry_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            license_plate TEXT NOT NULL,
+            detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ocr_confidence REAL,
+            approval_status TEXT DEFAULT 'pending',
+            is_dauerparker INTEGER DEFAULT 0,
+            approved_at TIMESTAMP,
+            notes TEXT
+        )
     '''
 }
 

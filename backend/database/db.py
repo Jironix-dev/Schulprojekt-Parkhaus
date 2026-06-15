@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 from .models import SCHEMA
+from sqlite3 import Connection
 
 # Datenbankpfad
 DB_PATH = Path(__file__).parent.parent.parent / 'data' / 'parkhaus.db'
@@ -17,7 +18,7 @@ class Database:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = None
+        self.connection: Optional[Connection] = None
         
     def connect(self):
         """Stellt Verbindung zur Datenbank her"""
@@ -39,7 +40,8 @@ class Database:
         """Erstellt alle notwendigen Tabellen"""
         if not self.connection:
             self.connect()
-            
+        
+        assert self.connection is not None
         cursor = self.connection.cursor()
         
         try:
@@ -67,16 +69,19 @@ class Database:
         """Gibt einen Datenbank-Cursor zurück"""
         if not self.connection:
             self.connect()
+        assert self.connection is not None
         return self.connection.cursor()
     
     def commit(self):
         """Speichert Änderungen"""
         if self.connection:
+            assert self.connection is not None
             self.connection.commit()
             
     def rollback(self):
         """Macht letzte Änderungen rückgängig"""
         if self.connection:
+            assert self.connection is not None
             self.connection.rollback()
 
 

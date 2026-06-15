@@ -458,6 +458,371 @@ h3 {
     background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
 }
 
+/* ==================== PRICING WIDGET ==================== */
+
+.pricing-card {
+    padding: 20px 15px !important;
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.pricing-card h3 {
+    text-align: center;
+    margin-bottom: 15px;
+    font-size: 1.1em;
+}
+
+.pricing-preview {
+    text-align: center;
+}
+
+.preview-text {
+    color: #a0a0a0;
+    font-size: 0.95em;
+    font-style: italic;
+}
+
+/* ==================== PRICING TABLE ==================== */
+
+.pricing-table-container {
+    overflow-x: auto;
+    margin-bottom: 20px;
+}
+
+.pricing-table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #f8f8f8;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.pricing-table thead {
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    color: white;
+}
+
+.pricing-table th {
+    padding: 15px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 1em;
+}
+
+.pricing-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #e0e0e0;
+    color: #333;
+}
+
+.pricing-table tbody tr {
+    transition: background-color 0.2s;
+}
+
+.pricing-table tbody tr:hover {
+    background-color: #f0f4ff;
+}
+
+.pricing-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.pricing-table .highlight-row {
+    background-color: #fff3cd;
+}
+
+.pricing-table .highlight-row:hover {
+    background-color: #ffe680;
+}
+
+.pricing-table strong {
+    color: #1e40af;
+    font-size: 1.05em;
+}
+
+.pricing-table .highlight-row strong {
+    color: #f39c12;
+}
+
+.pricing-note {
+    background: #e7f3ff;
+    border-left: 4px solid #1e40af;
+    padding: 15px;
+    border-radius: 4px;
+    color: #1e40af;
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.pricing-note p {
+    margin: 0;
+}
+
+/* ==================== ADD VEHICLE FORM ==================== */
+
+.add-vehicle-form {
+    background: #f5f5f5;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 25px;
+    border-left: 4px solid #1e40af;
+}
+
+.add-vehicle-form h4 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 1em;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 1em;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #1e40af;
+    background-color: #fff;
+}
+
+.form-group input.valid {
+    border-color: #4caf50;
+    background-color: #f1f8f4;
+}
+
+.form-group input.invalid {
+    border-color: #f44336;
+    background-color: #fdeaea;
+}
+
+.input-hint {
+    display: block;
+    font-size: 0.85em;
+    color: #999;
+    margin-top: 5px;
+}
+
+.input-hint.valid {
+    color: #4caf50;
+}
+
+.input-hint.invalid {
+    color: #f44336;
+}
+
+.btn-add-plate {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.95em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.btn-add-plate:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(30, 58, 138, 0.4);
+}
+
+.btn-add-plate:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.add-plate-message {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    display: none;
+}
+
+.add-plate-message.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+    display: block;
+}
+
+.add-plate-message.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    display: block;
+}
+
+.known-vehicles-section {
+    margin-top: 20px;
+}
+
+.known-vehicles-section h4 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 1em;
+}
+
+/* ==================== PROTOCOL WIDGET & TABLE ==================== */
+
+.protocol-card {
+    padding: 20px 15px !important;
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.protocol-card h3 {
+    text-align: center;
+    margin-bottom: 15px;
+    font-size: 1.1em;
+}
+
+.protocol-preview {
+    text-align: center;
+}
+
+.protocol-preview .preview-text {
+    color: #a0a0a0;
+    font-size: 0.95em;
+    font-style: italic;
+}
+
+.protocol-filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.filter-btn {
+    padding: 8px 16px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    background: white;
+    color: #333;
+    font-size: 0.9em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.filter-btn:hover {
+    border-color: #1e40af;
+    color: #1e40af;
+}
+
+.filter-btn.active {
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    color: white;
+    border-color: #1e40af;
+}
+
+.protocol-table-container {
+    overflow-x: auto;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.protocol-table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #f8f8f8;
+}
+
+.protocol-table thead {
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    color: white;
+    position: sticky;
+    top: 0;
+}
+
+.protocol-table th {
+    padding: 12px 15px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.95em;
+}
+
+.protocol-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #e0e0e0;
+    color: #333;
+}
+
+.protocol-table tbody tr {
+    transition: background-color 0.2s;
+}
+
+.protocol-table tbody tr:hover {
+    background-color: #f0f4ff;
+}
+
+.protocol-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.protocol-table .status-valid {
+    color: #4caf50;
+    font-weight: 600;
+}
+
+.protocol-table .status-valid::before {
+    content: "✓ ";
+}
+
+.protocol-table .status-invalid {
+    color: #f44336;
+    font-weight: 600;
+}
+
+.protocol-table .status-invalid::before {
+    content: "✗ ";
+}
+
+.protocol-table .confidence-high {
+    color: #4caf50;
+    font-weight: 500;
+}
+
+.protocol-table .confidence-medium {
+    color: #ff9800;
+    font-weight: 500;
+}
+
+.protocol-table .confidence-low {
+    color: #f44336;
+    font-weight: 500;
+}
+
+.protocol-table .loading {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+}
+
 /* Footer */
 .footer {
     text-align: center;
@@ -886,6 +1251,36 @@ h3 {
     color: #e74c3c;
 }
 
+.known-vehicle-item {
+    position: relative;
+}
+
+.btn-delete-vehicle {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1.2em;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 35px;
+    height: 35px;
+}
+
+.btn-delete-vehicle:hover {
+    background: #c0392b;
+    transform: scale(1.1);
+}
+
+.btn-delete-vehicle:active {
+    transform: scale(0.95);
+}
+
 .modal-summary {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
@@ -938,4 +1333,81 @@ h3 {
 
 .stat-item .stat-value.highlight {
     color: #e74c3c;
+}
+
+/* ==================== ENTRY REQUEST STYLES ==================== */
+
+.action-buttons {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.btn-approve,
+.btn-reject {
+    padding: 6px 10px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: bold;
+    transition: all 0.2s ease;
+    min-width: 50px;
+}
+
+.btn-approve {
+    background: #ffffff;
+    color: black;
+}
+
+.btn-approve:hover {
+    background: #6bf8a6;
+    transform: scale(1.05);
+}
+
+.btn-approve:active {
+    transform: scale(0.95);
+}
+
+.btn-reject {
+    background: #ffffff;
+    color: black;
+}
+
+.btn-reject:hover {
+    background: #e7412e;
+    transform: scale(1.05);
+}
+
+.btn-reject:active {
+    transform: scale(0.95);
+}
+
+.dauerparker-badge {
+    background: #ffffff;
+    color: black;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.status-pending {
+    background: #ffffff;
+    color: black;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+/* Status styling for protocol table */
+.protocol-table td {
+    padding: 10px;
+    border-bottom: 1px solid #ddd;
+}
+
+.protocol-table tbody tr:hover {
+    background: #f5f5f5;
 }
