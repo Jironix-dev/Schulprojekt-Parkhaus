@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "AI"))
 from AI.plate_recognizer import PlateRecognizer
 from AI.plate_detection_models import PlateDetectionResult, RecognitionStatistics
 from AI.image_processor import ImageProcessor
+from backend.database.db import db
+from .ocr_correction import OCRCorrectionService
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,7 @@ class PlateRecognitionService:
         try:
             # Erkenne Kennzeichen
             result = self._recognizer.detect_plate_in_frame(frame)
+            result = self._apply_ocr_correction(result)
             
             # Aktualisiere Statistiken
             self._statistics.update(result)
@@ -96,6 +99,51 @@ class PlateRecognitionService:
         except Exception as e:
             logger.error(f"Fehler bei Erkennung: {e}")
             return self._error_response(str(e))
+
+    def _apply_ocr_correction(self, result: PlateDetectionResult) -> PlateDetectionResult:
+        """
+        Verbessert OCR-Rohtexte vor der Rueckgabe ans Dashboard.
+        """
+        if not result.detected_plate or not result.detected_plate.strip():
+            return result
+
+        correction = OCRCorrectionService.correct_plate(
+            raw_text=result.detected_plate,
+            known_plates=self._get_known_plates()
+        )
+
+        result.detected_plate = correction["corrected_plate"]
+        result.plate_valid = correction["is_valid"]
+        result.success = correction["is_valid"]
+
+        if correction["is_valid"]:
+            result.error = ""
+            logger.info(
+                "[OCR-KORREKTUR] '%s' -> '%s' (%s)",
+                correction["raw_text"],
+                correction["corrected_plate"],
+                correction["best_reason"],
+            )
+        elif not result.error:
+            result.error = "Kennzeichen konnte nicht in gueltiges Format korrigiert werden"
+
+        setattr(result, "raw_detected_plate", correction["raw_text"])
+        setattr(result, "correction_applied", correction["was_corrected"])
+        setattr(result, "correction_confidence", correction["confidence_level"])
+        setattr(result, "correction_reason", correction["best_reason"])
+        setattr(result, "correction_candidates", correction["candidates"])
+        setattr(result, "matched_known_plate", correction["matched_known_plate"])
+        return result
+
+    def _get_known_plates(self) -> list:
+        """Liest bekannte Kennzeichen aus der Datenbank fuer die Korrekturschicht."""
+        try:
+            cursor = db.get_cursor()
+            cursor.execute("SELECT license_plate FROM vehicles WHERE license_plate IS NOT NULL")
+            return [row[0] for row in cursor.fetchall() if row[0]]
+        except Exception as e:
+            logger.warning(f"Bekannte Kennzeichen konnten nicht geladen werden: {e}")
+            return []
     
     def _build_response(self, result: PlateDetectionResult, 
                         original_frame: np.ndarray) -> Dict[str, Any]:
@@ -107,12 +155,18 @@ class PlateRecognitionService:
         response = {
             "success": result.success,
             "detected_plate": result.detected_plate,
+            "raw_detected_plate": getattr(result, "raw_detected_plate", result.detected_plate),
             "plate_confidence": round(result.plate_confidence, 4),
             "ocr_confidence": round(result.ocr_confidence, 4),
             "combined_confidence": round(result.get_combined_confidence(), 4),
             "timestamp": result.detection_timestamp,
             "error": result.error,
-            "plate_valid": result.plate_valid
+            "plate_valid": result.plate_valid,
+            "correction_applied": getattr(result, "correction_applied", False),
+            "correction_confidence": getattr(result, "correction_confidence", "low"),
+            "correction_reason": getattr(result, "correction_reason", ""),
+            "matched_known_plate": getattr(result, "matched_known_plate", False),
+            "correction_candidates": getattr(result, "correction_candidates", []),
         }
         
         # WICHTIG: Zeige Bilder wenn Kennzeichen erkannt wurde (gültig ODER ungültig!)

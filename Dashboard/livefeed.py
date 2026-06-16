@@ -13,6 +13,7 @@ import numpy as np
 from typing import Optional, Generator, Any
 import time
 import threading
+import platform
 
 # Try to import picamera2 (only available on Raspberry Pi)
 try:
@@ -104,7 +105,10 @@ class LiveFeedHandler:
                 print("[LiveFeed] Suche USB-Kamera...")
                 camera = None
                 for idx in range(5):
-                    cap = cv2.VideoCapture(idx)
+                    if platform.system() == "Windows":
+                        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+                    else:
+                        cap = cv2.VideoCapture(idx)
                     if cap.isOpened():
                         ret, _ = cap.read()
                         if ret:
