@@ -83,64 +83,11 @@
                 </div>
             </div>
 
-            <!-- Aktive Session -->
-            <div class="card active-session-card">
-                <h3>🚙 Aktuelle Session</h3>
-                {% if data.active_session %}
-                    <div class="session-info">
-                        <div class="info-row">
-                            <span class="label">Kennzeichen:</span>
-                            <span class="value" id="plate">{{ data.active_session.license_plate }}</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="label">Parkdauer:</span>
-                            <span class="value" id="duration">{{ data.active_session.parking_duration_minutes }} Min</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="label">Eintritt:</span>
-                            <span class="value" id="entry-time">{{ data.active_session.entry_time[:16] }}</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="label">Confidence:</span>
-                            <span class="value" id="confidence">{% if data.active_session.confidence_score %}{{ (data.active_session.confidence_score * 100)|round(1) }}%{% else %}N/A{% endif %}</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="label">Kosten:</span>
-                            <span class="value highlight" id="cost">{{ "%.2f"|format(data.active_session.cost_calculated) }} €</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="label">Status:</span>
-                            <span class="value status-{{ data.active_session.status }}" id="status">{{ data.active_session.status }}</span>
-                        </div>
-                    </div>
-                    {% if not data.active_session.payment_confirmed %}
-                    <button class="btn btn-payment" onclick="pay()">Bezahlung bestätigen</button>
-                    {% else %}
-                    <div class="payment-confirmed">✓ Zahlung bestätigt</div>
-                    {% endif %}
-                {% else %}
-                <div class="no-session">
-                    <p>Keine aktive Session</p>
-                </div>
-                {% endif %}
-            </div>
-
-            <!-- Heutige Statistiken -->
-            <div class="card stats-card clickable" onclick="openModal('stats')">
-                <h3>📈 Heute</h3>
-                <div class="stats-grid">
-                    <div class="stat-box">
-                        <div class="stat-number" id="entries-today">{{ data.today_stats.entries_today }}</div>
-                        <div class="stat-description">Einfahrten</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-number" id="exits-today">{{ data.today_stats.exits_today }}</div>
-                        <div class="stat-description">Ausfahrten</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-number highlight" id="revenue-today">{{ "%.2f"|format(data.today_stats.revenue_today) }}€</div>
-                        <div class="stat-description">Einnahmen</div>
-                    </div>
+            <!-- Protokoll - Erkannte Kennzeichen -->
+            <div class="card protocol-card clickable" onclick="openModal('protocol')">
+                <h3>📋 Protokoll</h3>
+                <div class="protocol-preview">
+                    <p class="preview-text">Erkannte Kennzeichen anzeigen →</p>
                 </div>
             </div>
 
@@ -149,8 +96,16 @@
                 <div class="card pending-card clickable" onclick="openModal('costs')">
                     <h3>💰 Ausstehende Zahlungen</h3>
                 </div>
-                <div class="card recent-vehicles-card clickable" onclick="openModal('known-vehicles')">
-                    <h3>🚗 Bekannte Kennzeichen</h3>
+                <div class="card recent-vehicles-card clickable" onclick="openModal('dauerparker')">
+                    <h3>🚘 Dauerparker</h3>
+                </div>
+            </div>
+
+            <!-- Kostenmodell Widget -->
+            <div class="card pricing-card clickable" onclick="openModal('pricing')">
+                <h3>💳 Kostenmodell</h3>
+                <div class="pricing-preview">
+                    <p class="preview-text">Parkzeitpreise anzeigen →</p>
                 </div>
             </div>
         </div>
@@ -234,45 +189,86 @@
     </div>
 </div>
 
-<!-- Modal: Bekannte Kennzeichen -->
-<div id="modal-known-vehicles" class="modal">
+<!-- Modal: Dauerparker -->
+<div id="modal-dauerparker" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>🚗 Bekannte Kennzeichen</h2>
-            <button class="modal-close" onclick="closeModal('known-vehicles')">&times;</button>
+            <h2>🚕 Dauerparker</h2>
+            <button class="modal-close" onclick="closeModal('dauerparker')">&times;</button>
         </div>
         <div class="modal-body">
-            <div id="known-vehicles-list" class="data-list">
-                <p class="loading">Laden...</p>
+            <!-- Eingabefeld für neuen Dauerparker -->
+            <div class="add-vehicle-form">
+                <h4>➕ Neuen Dauerparker hinzufügen</h4>
+                <div class="form-group">
+                    <input 
+                        type="text" 
+                        id="new-plate-input" 
+                        placeholder="z.B. A 1234" 
+                        maxlength="6"
+                        autocomplete="off"
+                        spellcheck="false"
+                        oninput="validatePlateInput(this)"
+                        onkeypress="if(event.key === 'Enter') addNewDauerparker()"
+                    >
+                    <span class="input-hint" id="plate-hint">Format: Buchstabe Leerzeichen 4 Ziffern (z.B. A 1234)</span>
+                </div>
+                <button class="btn btn-add-plate" onclick="addNewDauerparker()">Hinzufügen</button>
+                <div id="add-plate-message" class="add-plate-message"></div>
             </div>
-            <div class="modal-summary">
-                <strong>Gesamt Fahrzeuge:</strong> <span id="known-vehicles-count">0</span>
+
+            <!-- Liste Dauerparker -->
+            <div class="known-vehicles-section">
+                <h4>📋 Registrierte Dauerparker</h4>
+                <div id="dauerparker-list" class="data-list">
+                    <p class="loading">Laden...</p>
+                </div>
+                <div class="modal-summary">
+                    <strong>Gesamt Dauerparker:</strong> <span id="dauerparker-count">0</span>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Modal: Statistiken -->
-<div id="modal-stats" class="modal">
+<!-- Modal: Kostenmodell -->
+<div id="modal-pricing" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>📈 Tages-Statistiken</h2>
-            <button class="modal-close" onclick="closeModal('stats')">&times;</button>
+            <h2>💳 Kostenmodell</h2>
+            <button class="modal-close" onclick="closeModal('pricing')">&times;</button>
         </div>
         <div class="modal-body">
-            <div class="stats-detail">
-                <div class="stat-item">
-                    <span class="stat-label">Einfahrten:</span>
-                    <span class="stat-value" id="modal-entries">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Ausfahrten:</span>
-                    <span class="stat-value" id="modal-exits">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Einnahmen:</span>
-                    <span class="stat-value highlight" id="modal-revenue">0.00 €</span>
-                </div>
+            <div class="pricing-table-container">
+                <table class="pricing-table">
+                    <thead>
+                        <tr>
+                            <th>Parkdauer</th>
+                            <th>Preis</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>0 bis 30 Sekunden</td>
+                            <td><strong>2,00 €</strong></td>
+                        </tr>
+                        <tr>
+                            <td>31 bis 60 Sekunden</td>
+                            <td><strong>3,50 €</strong></td>
+                        </tr>
+                        <tr>
+                            <td>61 bis 90 Sekunden</td>
+                            <td><strong>5,00 €</strong></td>
+                        </tr>
+                        <tr class="highlight-row">
+                            <td>Jede weitere angefangene Stunde</td>
+                            <td><strong>+ 1,50 €</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pricing-note">
+                <p><strong>ℹ️ Hinweis:</strong> Die Parkdauer wird in angefangenen Zeiteinheiten berechnet. Teilstunden werden als volle Stunde berechnet.</p>
             </div>
         </div>
     </div>
@@ -334,6 +330,48 @@
                     <span class="label">Zeitstempel:</span>
                     <span class="value" id="detail-timestamp">-</span>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Erkennungsprotokoll -->
+<div id="modal-protocol" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>📋 Einfahrts-Anfragen</h2>
+            <button class="modal-close" onclick="closeModal('protocol')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="protocol-filters">
+                <button class="filter-btn active" onclick="filterEntries('all')" data-filter="all">Alle</button>
+                <button class="filter-btn" onclick="filterEntries('pending')" data-filter="pending">⏳ Ausstehend</button>
+                <button class="filter-btn" onclick="filterEntries('approved')" data-filter="approved">✅ Genehmigt</button>
+                <button class="filter-btn" onclick="filterEntries('rejected')" data-filter="rejected">❌ Abgelehnt</button>
+            </div>
+            
+            <div class="protocol-table-container">
+                <table class="protocol-table">
+                    <thead>
+                        <tr>
+                            <th>Uhrzeit</th>
+                            <th>Kennzeichen</th>
+                            <th>Status</th>
+                            <th>Konfidenz</th>
+                            <th>Dauerparker</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody id="protocol-list">
+                        <tr>
+                            <td colspan="6" class="loading">Laden...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="modal-summary">
+                <strong>Ausstehende Anfragen:</strong> <span id="protocol-count">0</span>
             </div>
         </div>
     </div>
