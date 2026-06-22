@@ -49,6 +49,9 @@ WLAN_PASSWORT = ""
 # Wie lange der ESP32 maximal auf die WLAN-Verbindung wartet.
 WLAN_TIMEOUT_SEKUNDEN = 20
 
+# Dauer pro LED-Schritt fuer die Verbindungs-Bestaetigung.
+LED_TEST_DAUER_SEKUNDEN = 0.4
+
 
 # =============================================================================
 # MQTT-EINSTELLUNGEN - HIER ANPASSEN
@@ -200,6 +203,28 @@ def grundzustand_setzen():
     schranke_schliessen()
 
 
+def verbindung_erfolgreich_anzeigen():
+    """
+    Zeigt ohne Serial Monitor an, dass WLAN und MQTT erfolgreich verbunden sind.
+
+    Ablauf:
+    Rot -> Gelb -> Gruen -> Gelb -> Rot
+    """
+    ampel_rot_schalten()
+    time.sleep(LED_TEST_DAUER_SEKUNDEN)
+
+    ampel_gelb_schalten()
+    time.sleep(LED_TEST_DAUER_SEKUNDEN)
+
+    ampel_gruen_schalten()
+    time.sleep(LED_TEST_DAUER_SEKUNDEN)
+
+    ampel_gelb_schalten()
+    time.sleep(LED_TEST_DAUER_SEKUNDEN)
+
+    ampel_rot_schalten()
+
+
 # =============================================================================
 # WLAN UND MQTT
 # =============================================================================
@@ -327,6 +352,7 @@ def hauptprogramm():
         try:
             if client is None:
                 client = mqtt_verbinden()
+                verbindung_erfolgreich_anzeigen()
 
             # Wartet blockierend auf die naechste MQTT-Nachricht.
             client.wait_msg()
