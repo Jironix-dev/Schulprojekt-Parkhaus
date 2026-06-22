@@ -144,26 +144,39 @@ def confirm_payment():
             return {"message": "Keine aktive Session", "status": "error"}
         
         session_id = active_session['session_id']
-        
-        # Update in Datenbank
-        cursor = db.get_cursor()
-        cursor.execute("""
-            UPDATE parking_sessions 
-            SET payment_confirmed = 1, 
-                payment_confirmed_at = datetime('now'),
-                cost_paid = cost_calculated,
-                status = 'paid'
-            WHERE id = ?
-        """, (session_id,))
-        db.commit()
+        success, message, cost = DashboardService.confirm_session_payment(session_id)
+
+        if not success:
+            return {"message": message, "status": "error"}
         
         # Log hinzufügen
         logs.append({
             "time": time.strftime("%H:%M:%S"),
-            "event": f"Zahlung bestätigt für {active_session['license_plate']}"
+            "event": f"Zahlung bestätigt für {active_session['license_plate']} ({cost:.2f} EUR)"
         })
         
-        return {"message": "OK", "status": "success"}
+        return {"message": message, "status": "success", "cost_paid": cost}
+    except Exception as e:
+        return {"message": f"Fehler: {str(e)}", "status": "error"}
+
+
+@router.post("/api/payment/{session_id}")
+def confirm_session_payment(session_id: int):
+    """Bestätigt Zahlung fuer eine bestimmte Park-Session"""
+    try:
+        success, message, cost = DashboardService.confirm_session_payment(session_id)
+
+        if success:
+            logs.append({
+                "time": time.strftime("%H:%M:%S"),
+                "event": f"{message} ({cost:.2f} EUR)"
+            })
+
+        return {
+            "message": message,
+            "status": "success" if success else "error",
+            "cost_paid": cost
+        }
     except Exception as e:
         return {"message": f"Fehler: {str(e)}", "status": "error"}
 
@@ -184,6 +197,15 @@ def get_costs_widget():
         }
     except Exception as e:
         return {"error": str(e), "vehicles": []}
+
+
+@router.get("/api/widget/parking-occupancy")
+def get_parking_occupancy_widget():
+    """Widget: Aktuelle Auslastung und Fahrzeuge im Parkhaus"""
+    try:
+        return DashboardService.get_parking_occupancy_details()
+    except Exception as e:
+        return {"error": str(e), "vehicles": [], "count": 0}
 
 
 @router.get("/api/widget/durations")
