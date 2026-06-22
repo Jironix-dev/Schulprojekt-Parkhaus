@@ -144,7 +144,7 @@ function displayModalData(modalType, data, listId) {
                         </div>
                         <div>
                             <div class="data-item-value highlight">${v.cost_calculated.toFixed(2)} €</div>
-                            <span class="data-item-secondary">${v.payment_confirmed ? '✓ Bezahlt' : 'Ausstehend'}</span>
+                            <span class="data-item-secondary">${v.payment_confirmed ? 'Bezahlt' : 'Ausstehend'}</span>
                         </div>
                     </div>
                 `;
@@ -290,7 +290,7 @@ function displayCostData(data, container) {
                 </div>
                 <div class="payment-item-side">
                     <div class="data-item-value highlight">${v.cost_calculated.toFixed(2)} €</div>
-                    <button class="btn-payment-check" onclick="confirmPayment(${v.session_id})" title="Gebühr bezahlt">✓</button>
+                    <button class="btn-payment-check" onclick="confirmPayment(${v.session_id})" title="Gebühr bezahlt">Bezahlt</button>
                 </div>
             </div>
         `;
@@ -455,11 +455,11 @@ function displayRecognitionResult(data) {
     if (plateElement) {
         // Zeige Platte an und markiere, wenn ungültig
         if (data.plate_valid === false) {
-            plateElement.innerText = `${data.detected_plate} ❌`;
+            plateElement.innerText = `${data.detected_plate} - ungueltig`;
             plateElement.style.color = "#ff6b6b";
             console.log("Kennzeichen ist UNGÜLTIG"); // Debug
         } else if (data.plate_valid === true) {
-            plateElement.innerText = `${data.detected_plate} ✓`;
+            plateElement.innerText = `${data.detected_plate} - gueltig`;
             plateElement.style.color = "#51cf66";
             console.log("Kennzeichen ist GÜLTIG"); // Debug
         } else {
@@ -481,9 +481,9 @@ function displayRecognitionResult(data) {
 
     // Status-Hinweis
     if (data.plate_valid === false) {
-        html += '<div style="background:#ff6b6b; color:white; padding:10px; border-radius:8px; margin-bottom:10px; text-align:center; font-weight:bold;">❌ UNGÜLTIGES KENNZEICHEN ERKANNT!</div>';
+        html += '<div style="background:#ff6b6b; color:white; padding:10px; border-radius:8px; margin-bottom:10px; text-align:center; font-weight:bold;">UNGUELTIGES KENNZEICHEN ERKANNT!</div>';
     } else if (data.plate_valid === true) {
-        html += '<div style="background:#51cf66; color:white; padding:10px; border-radius:8px; margin-bottom:10px; text-align:center; font-weight:bold;">✓ Gültiges Kennzeichen</div>';
+        html += '<div style="background:#51cf66; color:white; padding:10px; border-radius:8px; margin-bottom:10px; text-align:center; font-weight:bold;">Gueltiges Kennzeichen</div>';
     }
 
     if (data.vehicle_snapshot) {
@@ -506,7 +506,7 @@ function displayRecognitionResult(data) {
  */
 function showRecognitionError(message) {
     const resultDiv = document.getElementById("recognition-result");
-    resultDiv.innerHTML = `<p style="text-align:center; color:#ffcccc;">❌ ${message}</p>`;
+    resultDiv.innerHTML = `<p style="text-align:center; color:#ffcccc;">${message}</p>`;
     resultDiv.classList.add("visible");
 }
 
@@ -596,7 +596,7 @@ function validatePlateInput(inputElement) {
         inputElement.classList.add('valid');
         hint.classList.remove('invalid');
         hint.classList.add('valid');
-        hint.textContent = '✓ Format gültig';
+        hint.textContent = 'Format gueltig';
         button.disabled = false;
     } else {
         inputElement.classList.remove('valid');
@@ -609,7 +609,7 @@ function validatePlateInput(inputElement) {
         } else if (value.length < 6 && value.includes(' ')) {
             hint.textContent = `Noch ${6 - value.length} Zeichen nötig`;
         } else {
-            hint.textContent = '✗ Format ungültig (z.B. A 1234)';
+            hint.textContent = 'Format ungueltig (z.B. A 1234)';
         }
         button.disabled = true;
     }
@@ -622,7 +622,7 @@ async function addNewDauerparker() {
 
     // Validiere Format
     if (!PLATE_PATTERN.test(license_plate)) {
-        messageDiv.textContent = '✗ Ungültiges Format! Verwende: A 1234';
+        messageDiv.textContent = 'Ungueltiges Format! Verwende: A 1234';
         messageDiv.classList.remove('success');
         messageDiv.classList.add('error');
         return;
@@ -640,7 +640,7 @@ async function addNewDauerparker() {
         const data = await response.json();
 
         if (data.success) {
-            messageDiv.textContent = `✓ ${data.message}`;
+            messageDiv.textContent = data.message;
             messageDiv.classList.remove('error');
             messageDiv.classList.add('success');
             input.value = '';
@@ -651,12 +651,12 @@ async function addNewDauerparker() {
                 loadModalData('dauerparker');
             }, 1000);
         } else {
-            messageDiv.textContent = `✗ ${data.message}`;
+            messageDiv.textContent = data.message;
             messageDiv.classList.remove('success');
             messageDiv.classList.add('error');
         }
     } catch (error) {
-        messageDiv.textContent = `✗ Fehler beim Hinzufügen: ${error.message}`;
+        messageDiv.textContent = `Fehler beim Hinzufuegen: ${error.message}`;
         messageDiv.classList.remove('success');
         messageDiv.classList.add('error');
         console.error('Fehler:', error);
@@ -681,15 +681,15 @@ async function deleteDauerparker(license_plate) {
         const data = await response.json();
 
         if (data.success) {
-            console.log(`✓ Dauerparker gelöscht: ${license_plate}`);
+            console.log(`Dauerparker geloescht: ${license_plate}`);
             // Aktualisiere die Liste nach dem Löschen
             loadModalData('dauerparker');
         } else {
-            alert(`✗ Fehler beim Löschen: ${data.message}`);
+            alert(`Fehler beim Loeschen: ${data.message}`);
             console.error('Fehler:', data.message);
         }
     } catch (error) {
-        alert(`✗ Fehler beim Löschen: ${error.message}`);
+        alert(`Fehler beim Loeschen: ${error.message}`);
         console.error('Fehler:', error);
     }
 }
@@ -863,15 +863,15 @@ async function approveEntry(requestId) {
         const data = await response.json();
 
         if (data.status === 'success') {
-            console.log(`✓ Entry #${requestId} genehmigt`);
+            console.log(`Entry #${requestId} genehmigt`);
             // Aktualisiere die Protokoll-Tabelle
             displayProtocol('pending');
             update();
         } else {
-            alert(`✗ Fehler: ${data.message}`);
+            alert(`Fehler: ${data.message}`);
         }
     } catch (error) {
-        alert(`✗ Fehler beim Genehmigen: ${error.message}`);
+        alert(`Fehler beim Genehmigen: ${error.message}`);
         console.error('Fehler:', error);
     }
 }
@@ -892,14 +892,14 @@ async function rejectEntry(requestId) {
         const data = await response.json();
 
         if (data.status === 'success') {
-            console.log(`✓ Entry #${requestId} abgelehnt`);
+            console.log(`Entry #${requestId} abgelehnt`);
             // Aktualisiere die Protokoll-Tabelle
             displayProtocol('pending');
         } else {
-            alert(`✗ Fehler: ${data.message}`);
+            alert(`Fehler: ${data.message}`);
         }
     } catch (error) {
-        alert(`✗ Fehler beim Ablehnen: ${error.message}`);
+        alert(`Fehler beim Ablehnen: ${error.message}`);
         console.error('Fehler:', error);
     }
 }
