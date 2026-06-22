@@ -9,6 +9,11 @@ from backend.services.payment import PaymentCalculator
 
 
 class DashboardService:
+    @staticmethod
+    def _now_db() -> str:
+        """Lokaler Zeitstempel fuer SQLite, damit Parkdauer nicht mit UTC startet."""
+        return datetime.now().replace(microsecond=0).isoformat(sep=' ')
+
     """Service für Dashboard-Datenabfragen"""
     
     @staticmethod
@@ -76,7 +81,7 @@ class DashboardService:
         
         if result:
             entry_time = datetime.fromisoformat(result[2]) if isinstance(result[2], str) else result[2]
-            duration = (datetime.now() - entry_time).total_seconds() / 60  # Minuten
+            duration = max(0, (datetime.now() - entry_time).total_seconds() / 60)  # Minuten
             
             return {
                 'session_id': result[0],
@@ -209,7 +214,7 @@ class DashboardService:
         vehicles = []
         for row in results:
             entry_time = datetime.fromisoformat(row[4]) if isinstance(row[4], str) else row[4]
-            duration = (datetime.now() - entry_time).total_seconds() / 60
+            duration = max(0, (datetime.now() - entry_time).total_seconds() / 60)
             
             vehicles.append({
                 'session_id': row[0],
@@ -251,7 +256,7 @@ class DashboardService:
                 continue
 
             entry_time = datetime.fromisoformat(v['entry_time']) if isinstance(v['entry_time'], str) else v['entry_time']
-            parking_seconds = int((datetime.now() - entry_time).total_seconds())
+            parking_seconds = max(0, int((datetime.now() - entry_time).total_seconds()))
             current_cost = PaymentCalculator.calculate_from_seconds(parking_seconds)
 
             cost_details.append({
@@ -437,8 +442,8 @@ class DashboardService:
                 # Neuer Dauerparker
                 cursor.execute("""
                     INSERT INTO vehicles (license_plate, is_valid_format, status, registered_at, notes)
-                    VALUES (?, 1, 'dauerparker', datetime('now'), 'Manuell als Dauerparker hinzugefügt')
-                """, (license_plate,))
+                    VALUES (?, 1, 'dauerparker', ?, 'Manuell als Dauerparker hinzugefügt')
+                """, (license_plate, DashboardService._now_db()))
                 message = f"Dauerparker '{license_plate}' hinzugefügt"
             
             db.commit()
@@ -545,6 +550,7 @@ class DashboardService:
             
             # Bestimme Approval Status: Dauerparker werden automatisch genehmigt
             approval_status = 'approved' if is_dauerparker else 'pending'
+            approved_at = DashboardService._now_db() if is_dauerparker else None
             started_session = False
             session_message = ""
 
@@ -563,7 +569,7 @@ class DashboardService:
                 ocr_confidence,
                 approval_status,
                 1 if is_dauerparker else 0,
-                datetime.now() if is_dauerparker else None
+                approved_at
             ))
             db.commit()
             
@@ -639,9 +645,9 @@ class DashboardService:
             
             cursor.execute("""
                 UPDATE entry_requests
-                SET approval_status = 'approved', approved_at = datetime('now')
+                SET approval_status = 'approved', approved_at = ?
                 WHERE id = ?
-            """, (request_id,))
+            """, (DashboardService._now_db(), request_id))
             db.commit()
 
             _, session_message = DashboardService._start_parking_session_for_plate(
@@ -670,9 +676,9 @@ class DashboardService:
             
             cursor.execute("""
                 UPDATE entry_requests
-                SET approval_status = 'rejected', approved_at = datetime('now')
+                SET approval_status = 'rejected', approved_at = ?
                 WHERE id = ?
-            """, (request_id,))
+            """, (DashboardService._now_db(), request_id))
             db.commit()
             if cursor.rowcount == 0:
                 return False, "Entry Request nicht gefunden"
@@ -770,6 +776,7 @@ class DashboardService:
         if existing and existing[1]:
             return False, "Auto ist bereits im Parkhaus"
 
+        now = DashboardService._now_db()
         vehicle_status = 'dauerparker' if is_dauerparker else 'approved'
         if existing:
             vehicle_id = existing[0]
@@ -777,10 +784,10 @@ class DashboardService:
                 UPDATE vehicles
                 SET status = ?,
                     is_valid_format = 1,
-                    first_seen_at = COALESCE(first_seen_at, datetime('now')),
-                    last_seen_at = datetime('now')
+                    first_seen_at = COALESCE(first_seen_at, ?),
+                    last_seen_at = ?
                 WHERE id = ?
-            """, (vehicle_status, vehicle_id))
+            """, (vehicle_status, now, now, vehicle_id))
         else:
             cursor.execute("""
                 INSERT INTO vehicles (
@@ -791,18 +798,20 @@ class DashboardService:
                     last_seen_at,
                     notes
                 )
-                VALUES (?, 1, ?, datetime('now'), datetime('now'), ?)
+                VALUES (?, 1, ?, ?, ?, ?)
             """, (
                 license_plate,
                 vehicle_status,
+                now,
+                now,
                 'Automatisch nach Einfahrtsfreigabe angelegt'
             ))
             vehicle_id = cursor.lastrowid
 
         cursor.execute("""
             INSERT INTO parking_sessions (vehicle_id, entry_time, status)
-            VALUES (?, datetime('now'), 'parked')
-        """, (vehicle_id,))
+            VALUES (?, ?, 'parked')
+        """, (vehicle_id, now))
 
         cursor.execute("""
             UPDATE parking_capacity

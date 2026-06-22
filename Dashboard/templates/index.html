@@ -11,7 +11,7 @@
 
 <div class="container">
     <div class="header-top">
-        <h1>🚗 Parkhaus Dashboard</h1>
+        <h1>Parkhaus Dashboard</h1>
         <div class="current-time">
             <div class="time-display" id="current-time">--:--:--</div>
             <div class="date-display" id="current-date">--.--.----</div>
@@ -22,15 +22,15 @@
         <!-- Live-Feed (Links) -->
         <div class="feed-section">
             <div class="card camera-feed">
-                <h3>📹 Live-Feed</h3>
+                <h3>Live-Feed</h3>
                 <img id="live-feed-img" src="/api/stream" alt="Kamera-Feed">
             </div>
             
-            <!-- 🚨 Kennzeichen-Erkennung Panel -->
+            <!-- Kennzeichen-Erkennung Panel -->
             <div class="card recognition-panel">
-                <h3>🚨 Kennzeichen-Erkennung</h3>
+                <h3>Kennzeichen-Erkennung</h3>
                 <div class="recognition-controls">
-                    <button class="btn btn-recognize" onclick="recognizePlate()">🔍 Jetzt erkennen</button>
+                    <button class="btn btn-recognize" onclick="recognizePlate()">Jetzt erkennen</button>
                 </div>
                 
                 <div id="recognition-result" class="recognition-result hidden">
@@ -62,7 +62,7 @@
         <div class="widgets-section">
             <!-- Kapazität Anzeige -->
             <div class="card capacity-card clickable" onclick="openModal('occupancy')">
-                <h3>📊 Parkplatz-Auslastung</h3>
+                <h3>Parkplatz-Auslastung</h3>
                 <div class="capacity-grid">
                     <div class="capacity-stat">
                         <div class="stat-value" id="total-spaces">{{ data.parking_capacity.total_spaces }}</div>
@@ -81,21 +81,21 @@
                         <div class="stat-label">Auslastung</div>
                     </div>
                 </div>
-                <p class="preview-text capacity-preview">Autos im Parkhaus anzeigen →</p>
+                <p class="preview-text capacity-preview">Autos im Parkhaus anzeigen</p>
             </div>
 
             <!-- Protokoll - Erkannte Kennzeichen -->
             <div class="card protocol-card clickable" onclick="openModal('protocol')">
-                <h3>📋 Protokoll</h3>
+                <h3>Protokoll</h3>
                 <div class="protocol-preview">
-                    <p class="preview-text">Erkannte Kennzeichen anzeigen →</p>
+                    <p class="preview-text">Erkannte Kennzeichen anzeigen</p>
                 </div>
             </div>
 
             <!-- Ausstehende Zahlungen & Bekannte Kennzeichen (nebeneinander) -->
             <div class="bottom-widgets-row">
                 <div class="card pending-card clickable" onclick="openModal('costs')">
-                    <h3>💰 Ausstehende Zahlungen</h3>
+                    <h3>Ausstehende Zahlungen</h3>
                     <div class="pending-widget-summary">
                         <span id="pending-count-preview">{{ data.pending_payments.pending_count }}</span>
                         <small>offen</small>
@@ -103,15 +103,15 @@
                     </div>
                 </div>
                 <div class="card recent-vehicles-card clickable" onclick="openModal('dauerparker')">
-                    <h3>🚘 Dauerparker</h3>
+                    <h3>Dauerparker</h3>
                 </div>
             </div>
 
             <!-- Kostenmodell Widget -->
             <div class="card pricing-card clickable" onclick="openModal('pricing')">
-                <h3>💳 Kostenmodell</h3>
+                <h3>Kostenmodell</h3>
                 <div class="pricing-preview">
-                    <p class="preview-text">Parkzeitpreise anzeigen →</p>
+                    <p class="preview-text">Parkzeitpreise anzeigen</p>
                 </div>
             </div>
         </div>
@@ -120,7 +120,7 @@
     <!-- Footer -->
     <div class="footer">
         <p>Letzte Aktualisierung: <span id="last-update">{{ data.timestamp[:19] }}</span></p>
-        <a href="/logs">Zu den Logs →</a>
+        <a href="/logs">Zu den Logs</a>
     </div>
 </div>
 
@@ -130,7 +130,7 @@
 <div id="modal-occupancy" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>📊 Parkplatz-Auslastung</h2>
+            <h2>Parkplatz-Auslastung</h2>
             <button class="modal-close" onclick="closeModal('occupancy')">&times;</button>
         </div>
         <div class="modal-body">
@@ -163,7 +163,7 @@
 <div id="modal-costs" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>💰 Ausstehende Zahlungen</h2>
+            <h2>Ausstehende Zahlungen</h2>
             <button class="modal-close" onclick="closeModal('costs')">&times;</button>
         </div>
         <div class="modal-body">
@@ -181,7 +181,7 @@
 <div id="modal-durations" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>⏱️ Parkdauer-Übersicht</h2>
+            <h2>Parkdauer-Übersicht</h2>
             <button class="modal-close" onclick="closeModal('durations')">&times;</button>
         </div>
         <div class="modal-body">
@@ -199,7 +199,7 @@
 <div id="modal-plate-recognition" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>🚗 Kennzeichen-Erkennung</h2>
+            <h2>Kennzeichen-Erkennung</h2>
             <button class="modal-close" onclick="closeModal('plate-recognition')">&times;</button>
         </div>
         <div class="modal-body">
@@ -217,7 +217,7 @@
 <div id="modal-status" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>🚙 Fahrzeug-Status</h2>
+            <h2>Fahrzeug-Status</h2>
             <button class="modal-close" onclick="closeModal('status')">&times;</button>
         </div>
         <div class="modal-body">
@@ -232,13 +232,13 @@
 <div id="modal-dauerparker" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>🚕 Dauerparker</h2>
+            <h2>Dauerparker</h2>
             <button class="modal-close" onclick="closeModal('dauerparker')">&times;</button>
         </div>
         <div class="modal-body">
             <!-- Eingabefeld für neuen Dauerparker -->
             <div class="add-vehicle-form">
-                <h4>➕ Neuen Dauerparker hinzufügen</h4>
+                <h4>Neuen Dauerparker hinzufügen</h4>
                 <div class="form-group">
                     <input 
                         type="text" 
@@ -258,7 +258,7 @@
 
             <!-- Liste Dauerparker -->
             <div class="known-vehicles-section">
-                <h4>📋 Registrierte Dauerparker</h4>
+                <h4>Registrierte Dauerparker</h4>
                 <div id="dauerparker-list" class="data-list">
                     <p class="loading">Laden...</p>
                 </div>
@@ -274,7 +274,7 @@
 <div id="modal-pricing" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>💳 Kostenmodell</h2>
+            <h2>Kostenmodell</h2>
             <button class="modal-close" onclick="closeModal('pricing')">&times;</button>
         </div>
         <div class="modal-body">
@@ -307,7 +307,7 @@
                 </table>
             </div>
             <div class="pricing-note">
-                <p><strong>ℹ️ Hinweis:</strong> Die Parkdauer wird in angefangenen Zeiteinheiten berechnet. Teilstunden werden als volle Stunde berechnet.</p>
+                <p><strong>Hinweis:</strong> Die Parkdauer wird in angefangenen Zeiteinheiten berechnet. Teilstunden werden als volle Stunde berechnet.</p>
             </div>
         </div>
     </div>
@@ -320,7 +320,7 @@
 <div id="modal-recognition-details" class="modal">
     <div class="modal-content modal-recognition">
         <div class="modal-header">
-            <h2>📷 Erkennungs-Details</h2>
+            <h2>Erkennungs-Details</h2>
             <button class="modal-close" onclick="closeModal('recognition-details')">&times;</button>
         </div>
         <div class="modal-body">
@@ -378,15 +378,15 @@
 <div id="modal-protocol" class="modal">
     <div class="modal-content modal-protocol">
         <div class="modal-header">
-            <h2>📋 Einfahrts-Anfragen</h2>
+            <h2>Einfahrts-Anfragen</h2>
             <button class="modal-close" onclick="closeModal('protocol')">&times;</button>
         </div>
         <div class="modal-body">
             <div class="protocol-filters">
                 <button class="filter-btn active" onclick="filterEntries('all')" data-filter="all">Alle</button>
-                <button class="filter-btn" onclick="filterEntries('pending')" data-filter="pending">⏳ Ausstehend</button>
-                <button class="filter-btn" onclick="filterEntries('approved')" data-filter="approved">✅ Genehmigt</button>
-                <button class="filter-btn" onclick="filterEntries('rejected')" data-filter="rejected">❌ Abgelehnt</button>
+                <button class="filter-btn" onclick="filterEntries('pending')" data-filter="pending">Ausstehend</button>
+                <button class="filter-btn" onclick="filterEntries('approved')" data-filter="approved">Genehmigt</button>
+                <button class="filter-btn" onclick="filterEntries('rejected')" data-filter="rejected">Abgelehnt</button>
             </div>
             
             <div class="protocol-table-container">
