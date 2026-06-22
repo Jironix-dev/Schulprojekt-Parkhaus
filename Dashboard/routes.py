@@ -16,6 +16,11 @@ from backend.services.dashboard_service import DashboardService
 from backend.services.plate_recognition_service import PlateRecognitionService
 from livefeed import generate_stream, get_static_frame, live_feed
 
+try:
+    from .mqtt_parking_control import start_parking_sequence_async
+except ImportError:
+    from mqtt_parking_control import start_parking_sequence_async
+
 router = APIRouter()
 # Pfad zum templates-Verzeichnis
 templates_dir = Path(__file__).parent / "templates"
@@ -30,6 +35,69 @@ except Exception as e:
 
 # Logs speichern
 logs = []
+
+
+def start_mqtt_gate_sequence(license_plate: str) -> None:
+    """Startet Ampel- und Schrankenablauf nach erfolgreicher Kennzeichen-Erkennung."""
+    start_parking_sequence_async()
+    logs.append({
+        "time": time.strftime("%H:%M:%S"),
+        "event": f"MQTT-Ablauf gestartet für {license_plate}"
+    })
+
+
+def get_entry_request_info(request_id: int) -> dict | None:
+    """Liest die wichtigsten Daten einer Entry Request fuer MQTT-Entscheidungen."""
+    cursor = db.get_cursor()
+    cursor.execute("""
+        SELECT license_plate, approval_status, is_dauerparker
+        FROM entry_requests
+        WHERE id = ?
+    """, (request_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "license_plate": row[0],
+        "approval_status": row[1],
+        "is_dauerparker": bool(row[2]),
+    }
+
+
+def get_latest_entry_request_for_plate(license_plate: str) -> dict | None:
+    """Findet die neueste Entry Request fuer ein erkanntes Kennzeichen."""
+    cursor = db.get_cursor()
+    cursor.execute("""
+        SELECT id, approval_status, is_dauerparker
+        FROM entry_requests
+        WHERE license_plate = ?
+        ORDER BY id DESC
+        LIMIT 1
+    """, (license_plate,))
+    row = cursor.fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "approval_status": row[1],
+        "is_dauerparker": bool(row[2]),
+    }
+
+
+def start_mqtt_for_auto_approved_dauerparker(license_plate: str) -> None:
+    """Oeffnet Ampel/Schranke nur bei automatisch genehmigten Dauerparkern."""
+    entry_request = get_latest_entry_request_for_plate(license_plate)
+
+    if (
+        entry_request
+        and entry_request["approval_status"] == "approved"
+        and entry_request["is_dauerparker"]
+    ):
+        start_mqtt_gate_sequence(license_plate)
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
@@ -355,6 +423,7 @@ async def detect_plate_from_camera():
                     "time": time.strftime("%H:%M:%S"),
                     "event": f"Entry Request: {license_plate} {message}"
                 })
+                start_mqtt_for_auto_approved_dauerparker(license_plate)
         
         return JSONResponse(result)
         
@@ -407,6 +476,8 @@ async def detect_plate_from_upload(file: UploadFile = File(...)):
                 "time": time.strftime("%H:%M:%S"),
                 "event": f"{status}: {license_plate} - {message}"
             })
+            if success:
+                start_mqtt_for_auto_approved_dauerparker(license_plate)
         elif result.get("detected_plate"):
             # Ungültiges Kennzeichen erkannt
             logs.append({
@@ -498,6 +569,8 @@ def save_entry_request(data: dict = Body(...)):
             "time": time.strftime("%H:%M:%S"),
             "event": f"Entry Request: {license_plate} - {message}"
         })
+        if success:
+            start_mqtt_for_auto_approved_dauerparker(license_plate)
         
         return {
             "status": "success" if success else "error",
@@ -529,12 +602,20 @@ def approve_entry(request_id: int):
     Genehmigt einen Entry Request (Auto darf einfahren).
     """
     try:
+        entry_before_approval = get_entry_request_info(request_id)
         success, message = DashboardService.approve_entry_request(request_id)
         
         logs.append({
             "time": time.strftime("%H:%M:%S"),
             "event": f"Entry #{request_id} genehmigt"
         })
+
+        if (
+            success
+            and entry_before_approval
+            and entry_before_approval["approval_status"] == "pending"
+        ):
+            start_mqtt_gate_sequence(entry_before_approval["license_plate"])
         
         return {
             "status": "success" if success else "error",
