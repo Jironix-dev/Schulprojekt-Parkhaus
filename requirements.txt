@@ -9,3 +9,4 @@ pillow
 numpy
 python-multipart
 paddleocr
+paho-mqtt
