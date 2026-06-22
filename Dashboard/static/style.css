@@ -193,6 +193,90 @@ h3 {
     text-align: center;
 }
 
+.capacity-preview {
+    margin-top: 15px;
+    text-align: center;
+}
+
+.occupancy-overview {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 20px;
+    align-items: stretch;
+    margin-bottom: 20px;
+}
+
+.occupancy-number {
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    color: white;
+    border-radius: 10px;
+    padding: 22px;
+    text-align: center;
+}
+
+.occupancy-number span {
+    display: block;
+    font-size: 3em;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.occupancy-number small {
+    display: block;
+    margin-top: 8px;
+    font-weight: 600;
+}
+
+.occupancy-meta {
+    background: #f5f5f5;
+    border-radius: 10px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+    color: #333;
+}
+
+.access-rules-box {
+    background: #e7f3ff;
+    border-left: 4px solid #1e40af;
+    color: #1e40af;
+    padding: 15px;
+    border-radius: 6px;
+    line-height: 1.5;
+    margin-bottom: 20px;
+}
+
+.modal-section-title {
+    color: #333;
+    margin: 0 0 12px 0;
+}
+
+.occupancy-item-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.vehicle-type {
+    padding: 5px 9px;
+    border-radius: 6px;
+    font-size: 0.85em;
+    font-weight: bold;
+}
+
+.vehicle-type-dauerparker {
+    background: #d4edda;
+    color: #155724;
+}
+
+.vehicle-type-approved {
+    background: #e7f3ff;
+    color: #1e40af;
+}
+
 .stat-value {
     font-size: 2em;
     font-weight: bold;
@@ -338,6 +422,29 @@ h3 {
     font-size: 1.1em;
 }
 
+.pending-widget-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 12px;
+    color: #333;
+}
+
+.pending-widget-summary span {
+    font-size: 1.6em;
+    font-weight: bold;
+    color: #f39c12;
+}
+
+.pending-widget-summary small {
+    color: #666;
+}
+
+.pending-widget-summary strong {
+    color: #dc2626;
+    font-size: 1.1em;
+}
+
 .stat-description {
     font-size: 0.9em;
     color: #666;
@@ -377,6 +484,31 @@ h3 {
 .amount {
     font-weight: bold;
     color: #f39c12;
+}
+
+.payment-item-side {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.btn-payment-check {
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: #16a34a;
+    color: white;
+    cursor: pointer;
+    font-size: 1.5em;
+    font-weight: bold;
+    line-height: 1;
+    transition: transform 0.2s, background-color 0.2s;
+}
+
+.btn-payment-check:hover {
+    background: #15803d;
+    transform: scale(1.08);
 }
 
 /* Fahrzeuge Liste */
@@ -772,6 +904,26 @@ h3 {
     color: #333;
 }
 
+.protocol-table .protocol-datetime {
+    min-width: 130px;
+    white-space: nowrap;
+}
+
+.protocol-datetime span,
+.protocol-datetime small {
+    display: block;
+}
+
+.protocol-datetime span {
+    font-weight: 700;
+    color: #1e40af;
+}
+
+.protocol-datetime small {
+    color: #666;
+    margin-top: 3px;
+}
+
 .protocol-table tbody tr {
     transition: background-color 0.2s;
 }
@@ -886,6 +1038,20 @@ h3 {
     .capacity-grid {
         grid-template-columns: repeat(2, 1fr);
     }
+
+    .occupancy-overview {
+        grid-template-columns: 1fr;
+    }
+
+    .occupancy-item {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .occupancy-item-side {
+        align-items: flex-start;
+    }
     
     .stats-grid {
         grid-template-columns: 1fr;
@@ -942,6 +1108,12 @@ h3 {
     max-height: 80vh;
     overflow-y: auto;
     animation: slideIn 0.3s ease;
+}
+
+.modal-content.modal-protocol {
+    max-width: 1050px;
+    width: 95%;
+    max-height: 88vh;
 }
 
 .modal-header {

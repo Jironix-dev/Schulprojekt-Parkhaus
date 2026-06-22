@@ -5,6 +5,7 @@ Dashboard-Service: Ruft relevante Daten von der Datenbank für das Dashboard ab
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 from backend.database.db import db
+from backend.services.payment import PaymentCalculator
 
 
 class DashboardService:
@@ -14,6 +15,17 @@ class DashboardService:
     def get_parking_capacity() -> Dict[str, Any]:
         """Ruft aktuelle Parkplatz-Kapazität ab"""
         cursor = db.get_cursor()
+        cursor.execute("""
+            UPDATE parking_capacity
+            SET occupied_spaces = (
+                SELECT COUNT(*)
+                FROM parking_sessions
+                WHERE exit_time IS NULL AND status = 'parked'
+            ),
+            last_updated = datetime('now')
+            WHERE id = 1
+        """)
+        db.commit()
         cursor.execute("""
             SELECT total_spaces, occupied_spaces, last_updated 
             FROM parking_capacity 
@@ -84,17 +96,11 @@ class DashboardService:
     @staticmethod
     def get_pending_payments() -> Dict[str, Any]:
         """Ruft ausstehende Zahlungen ab"""
-        cursor = db.get_cursor()
-        cursor.execute("""
-            SELECT COUNT(*), COALESCE(SUM(cost_calculated - cost_paid), 0)
-            FROM parking_sessions
-            WHERE payment_confirmed = 0 AND exit_time IS NOT NULL
-        """)
-        result = cursor.fetchone()
+        pending_payments = DashboardService.get_cost_details()
         
         return {
-            'pending_count': result[0],
-            'total_amount_pending': round(result[1], 2) if result[1] else 0.0
+            'pending_count': len(pending_payments),
+            'total_amount_pending': round(sum(v['cost_calculated'] for v in pending_payments), 2)
         }
     
     @staticmethod
@@ -213,30 +219,54 @@ class DashboardService:
                 'entry_time': row[4],
                 'session_status': row[6],
                 'parking_duration_minutes': round(duration, 1),
+                'parking_duration_formatted': f"{int(duration)} Min {int((duration % 1) * 60)} Sek",
                 'cost_calculated': row[8],
                 'cost_paid': row[9],
                 'payment_confirmed': bool(row[10]),
                 'confidence_score': row[11],
-                'total_sessions': row[12]
+                'total_sessions': row[12],
+                'is_dauerparker': row[3] == 'dauerparker'
             })
         
         return vehicles
     
     @staticmethod
+    def get_parking_occupancy_details() -> Dict[str, Any]:
+        """Ruft Kapazitaet und alle aktuell parkenden Fahrzeuge ab."""
+        vehicles = DashboardService.get_all_parked_vehicles()
+        return {
+            'parking_capacity': DashboardService.get_parking_capacity(),
+            'vehicles': vehicles,
+            'count': len(vehicles)
+        }
+
+    @staticmethod
     def get_cost_details() -> list:
         """Ruft Kostendetails für alle parkenden Fahrzeuge ab"""
         vehicles = DashboardService.get_all_parked_vehicles()
-        return [
-            {
+        cost_details = []
+
+        for v in vehicles:
+            if v['is_dauerparker'] or v['payment_confirmed']:
+                continue
+
+            entry_time = datetime.fromisoformat(v['entry_time']) if isinstance(v['entry_time'], str) else v['entry_time']
+            parking_seconds = int((datetime.now() - entry_time).total_seconds())
+            current_cost = PaymentCalculator.calculate_from_seconds(parking_seconds)
+
+            cost_details.append({
+                'session_id': v['session_id'],
                 'license_plate': v['license_plate'],
                 'entry_time': v['entry_time'],
-                'cost_calculated': round(v['cost_calculated'], 2),
-                'cost_paid': round(v['cost_paid'], 2),
+                'parking_duration_minutes': v['parking_duration_minutes'],
+                'parking_duration_formatted': v['parking_duration_formatted'],
+                'cost_calculated': current_cost,
+                'cost_paid': round(v['cost_paid'] or 0, 2),
                 'payment_confirmed': v['payment_confirmed'],
                 'status': v['session_status']
-            }
-            for v in vehicles
-        ]
+            })
+
+        return cost_details
     
     @staticmethod
     def get_duration_details() -> list:
@@ -515,6 +545,14 @@ class DashboardService:
             
             # Bestimme Approval Status: Dauerparker werden automatisch genehmigt
             approval_status = 'approved' if is_dauerparker else 'pending'
+            started_session = False
+            session_message = ""
+
+            if is_dauerparker:
+                started_session, session_message = DashboardService._start_parking_session_for_plate(
+                    license_plate,
+                    is_dauerparker=True
+                )
             
             # Speichere Entry Request
             cursor.execute("""
@@ -530,6 +568,8 @@ class DashboardService:
             db.commit()
             
             status_msg = "(Auto-genehmigt: Dauerparker)" if is_dauerparker else "(Bestätigung erforderlich)"
+            if started_session:
+                status_msg = f"{status_msg} - {session_message}"
             return True, f"Anfrage gespeichert {status_msg}"
             
         except Exception as e:
@@ -586,6 +626,16 @@ class DashboardService:
         """
         try:
             cursor = db.get_cursor()
+
+            cursor.execute("""
+                SELECT license_plate, is_dauerparker
+                FROM entry_requests
+                WHERE id = ?
+            """, (request_id,))
+            request = cursor.fetchone()
+
+            if not request:
+                return False, "Entry Request nicht gefunden"
             
             cursor.execute("""
                 UPDATE entry_requests
@@ -593,8 +643,13 @@ class DashboardService:
                 WHERE id = ?
             """, (request_id,))
             db.commit()
+
+            _, session_message = DashboardService._start_parking_session_for_plate(
+                request[0],
+                is_dauerparker=bool(request[1])
+            )
             
-            return True, "Entry genehmigt"
+            return True, f"Entry genehmigt - {session_message}"
             
         except Exception as e:
             return False, f"Fehler: {str(e)}"
@@ -619,8 +674,146 @@ class DashboardService:
                 WHERE id = ?
             """, (request_id,))
             db.commit()
+            if cursor.rowcount == 0:
+                return False, "Entry Request nicht gefunden"
             
             return True, "Entry abgelehnt"
             
         except Exception as e:
             return False, f"Fehler: {str(e)}"
+
+    @staticmethod
+    def confirm_session_payment(session_id: int) -> Tuple[bool, str, Optional[float]]:
+        """Bestaetigt die Zahlung und beendet damit die Parkdauer."""
+        try:
+            cursor = db.get_cursor()
+            cursor.execute("""
+                SELECT
+                    ps.entry_time,
+                    ps.exit_time,
+                    ps.payment_confirmed,
+                    v.status,
+                    v.license_plate
+                FROM parking_sessions ps
+                JOIN vehicles v ON ps.vehicle_id = v.id
+                WHERE ps.id = ?
+            """, (session_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return False, "Park-Session nicht gefunden", None
+            if row[3] == 'dauerparker':
+                return False, "Dauerparker muessen keine Parkgebuehr bezahlen", None
+            if row[2]:
+                return False, "Parkgebuehr wurde bereits bezahlt", None
+
+            entry_time = datetime.fromisoformat(row[0]) if isinstance(row[0], str) else row[0]
+            payment_time = datetime.now()
+            parking_seconds = int((payment_time - entry_time).total_seconds())
+            parking_minutes = max(0, int(parking_seconds / 60))
+            cost = PaymentCalculator.calculate_from_seconds(parking_seconds)
+
+            cursor.execute("""
+                UPDATE parking_sessions
+                SET exit_time = ?,
+                    status = 'payment_confirmed',
+                    parking_duration_minutes = ?,
+                    cost_calculated = ?,
+                    cost_paid = ?,
+                    payment_confirmed = 1,
+                    payment_confirmed_at = ?
+                WHERE id = ?
+            """, (
+                payment_time,
+                parking_minutes,
+                cost,
+                cost,
+                payment_time,
+                session_id
+            ))
+
+            cursor.execute("""
+                UPDATE parking_capacity
+                SET occupied_spaces = (
+                    SELECT COUNT(*)
+                    FROM parking_sessions
+                    WHERE exit_time IS NULL AND status = 'parked'
+                ),
+                last_updated = datetime('now')
+                WHERE id = 1
+            """)
+
+            db.commit()
+            return True, f"Zahlung fuer {row[4]} bestaetigt", cost
+
+        except Exception as e:
+            return False, f"Fehler: {str(e)}", None
+
+    @staticmethod
+    def _start_parking_session_for_plate(license_plate: str, is_dauerparker: bool = False) -> Tuple[bool, str]:
+        """Erstellt nach Freigabe eine aktive Parkplatz-Session fuer ein Kennzeichen."""
+        cursor = db.get_cursor()
+
+        cursor.execute("""
+            SELECT v.id, ps.id
+            FROM vehicles v
+            LEFT JOIN parking_sessions ps
+                ON ps.vehicle_id = v.id
+                AND ps.exit_time IS NULL
+                AND ps.status = 'parked'
+            WHERE v.license_plate = ?
+            ORDER BY ps.entry_time DESC
+            LIMIT 1
+        """, (license_plate,))
+        existing = cursor.fetchone()
+
+        if existing and existing[1]:
+            return False, "Auto ist bereits im Parkhaus"
+
+        vehicle_status = 'dauerparker' if is_dauerparker else 'approved'
+        if existing:
+            vehicle_id = existing[0]
+            cursor.execute("""
+                UPDATE vehicles
+                SET status = ?,
+                    is_valid_format = 1,
+                    first_seen_at = COALESCE(first_seen_at, datetime('now')),
+                    last_seen_at = datetime('now')
+                WHERE id = ?
+            """, (vehicle_status, vehicle_id))
+        else:
+            cursor.execute("""
+                INSERT INTO vehicles (
+                    license_plate,
+                    is_valid_format,
+                    status,
+                    first_seen_at,
+                    last_seen_at,
+                    notes
+                )
+                VALUES (?, 1, ?, datetime('now'), datetime('now'), ?)
+            """, (
+                license_plate,
+                vehicle_status,
+                'Automatisch nach Einfahrtsfreigabe angelegt'
+            ))
+            vehicle_id = cursor.lastrowid
+
+        cursor.execute("""
+            INSERT INTO parking_sessions (vehicle_id, entry_time, status)
+            VALUES (?, datetime('now'), 'parked')
+        """, (vehicle_id,))
+
+        cursor.execute("""
+            UPDATE parking_capacity
+            SET occupied_spaces = (
+                SELECT COUNT(*)
+                FROM parking_sessions
+                WHERE exit_time IS NULL AND status = 'parked'
+            ),
+            last_updated = datetime('now')
+            WHERE id = 1
+        """)
+
+        db.commit()
+        return True, "Auto wurde ins Parkhaus eingetragen"

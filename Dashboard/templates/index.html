@@ -61,7 +61,7 @@
         <!-- Widgets (Rechts) -->
         <div class="widgets-section">
             <!-- Kapazität Anzeige -->
-            <div class="card capacity-card">
+            <div class="card capacity-card clickable" onclick="openModal('occupancy')">
                 <h3>📊 Parkplatz-Auslastung</h3>
                 <div class="capacity-grid">
                     <div class="capacity-stat">
@@ -81,6 +81,7 @@
                         <div class="stat-label">Auslastung</div>
                     </div>
                 </div>
+                <p class="preview-text capacity-preview">Autos im Parkhaus anzeigen →</p>
             </div>
 
             <!-- Protokoll - Erkannte Kennzeichen -->
@@ -95,6 +96,11 @@
             <div class="bottom-widgets-row">
                 <div class="card pending-card clickable" onclick="openModal('costs')">
                     <h3>💰 Ausstehende Zahlungen</h3>
+                    <div class="pending-widget-summary">
+                        <span id="pending-count-preview">{{ data.pending_payments.pending_count }}</span>
+                        <small>offen</small>
+                        <strong><span id="pending-total-preview">{{ "%.2f"|format(data.pending_payments.total_amount_pending) }}</span> €</strong>
+                    </div>
                 </div>
                 <div class="card recent-vehicles-card clickable" onclick="openModal('dauerparker')">
                     <h3>🚘 Dauerparker</h3>
@@ -120,11 +126,44 @@
 
 <!-- ==================== MODALS ==================== -->
 
+<!-- Modal: Parkplatz-Auslastung -->
+<div id="modal-occupancy" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>📊 Parkplatz-Auslastung</h2>
+            <button class="modal-close" onclick="closeModal('occupancy')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="occupancy-overview">
+                <div class="occupancy-number">
+                    <span id="occupancy-current">0</span>
+                    <small>Autos im Parkhaus</small>
+                </div>
+                <div class="occupancy-meta">
+                    <span><strong>Gesamtplätze:</strong> <span id="occupancy-total">0</span></span>
+                    <span><strong>Freie Plätze:</strong> <span id="occupancy-free">0</span></span>
+                    <span><strong>Auslastung:</strong> <span id="occupancy-percent">0%</span></span>
+                </div>
+            </div>
+
+            <div class="access-rules-box">
+                <strong>Einfahrts-Regel:</strong>
+                Dauerparker fahren direkt ein. Nicht registrierte Kennzeichen müssen im Protokoll angenommen werden, bevor sie als im Parkhaus gezählt werden.
+            </div>
+
+            <h4 class="modal-section-title">Aktuell parkende Autos</h4>
+            <div id="occupancy-list" class="data-list">
+                <p class="loading">Laden...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal: Kosten -->
 <div id="modal-costs" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>💰 Kostenübersicht</h2>
+            <h2>💰 Ausstehende Zahlungen</h2>
             <button class="modal-close" onclick="closeModal('costs')">&times;</button>
         </div>
         <div class="modal-body">
@@ -132,7 +171,7 @@
                 <p class="loading">Laden...</p>
             </div>
             <div class="modal-summary">
-                <strong>Gesamtkosten:</strong> <span id="total-costs">0.00</span> €
+                <strong>Offene Gebühren:</strong> <span id="total-costs">0.00</span> €
             </div>
         </div>
     </div>
@@ -337,7 +376,7 @@
 
 <!-- Modal: Erkennungsprotokoll -->
 <div id="modal-protocol" class="modal">
-    <div class="modal-content">
+    <div class="modal-content modal-protocol">
         <div class="modal-header">
             <h2>📋 Einfahrts-Anfragen</h2>
             <button class="modal-close" onclick="closeModal('protocol')">&times;</button>
@@ -354,7 +393,7 @@
                 <table class="protocol-table">
                     <thead>
                         <tr>
-                            <th>Uhrzeit</th>
+                            <th>Datum / Uhrzeit</th>
                             <th>Kennzeichen</th>
                             <th>Status</th>
                             <th>Konfidenz</th>

@@ -66,6 +66,10 @@ async function loadModalData(modalType) {
     let listId = '';
 
     switch(modalType) {
+        case 'occupancy':
+            endpoint = '/api/widget/parking-occupancy';
+            listId = 'occupancy-list';
+            break;
         case 'costs':
             endpoint = '/api/widget/costs';
             listId = 'costs-list';
@@ -111,6 +115,16 @@ async function loadModalData(modalType) {
 // Zeige Modal-Daten an
 function displayModalData(modalType, data, listId) {
     const container = document.getElementById(listId);
+
+    if (modalType === 'occupancy') {
+        displayOccupancyData(data, container);
+        return;
+    }
+
+    if (modalType === 'costs') {
+        displayCostData(data, container);
+        return;
+    }
 
     if (!data.vehicles || data.vehicles.length === 0) {
         container.innerHTML = '<p class="loading">Keine Fahrzeuge im Parkhaus</p>';
@@ -216,6 +230,75 @@ function displayModalData(modalType, data, listId) {
     }
 }
 
+function displayOccupancyData(data, container) {
+    const capacity = data.parking_capacity || {};
+    document.getElementById('occupancy-current').innerText = capacity.occupied_spaces ?? 0;
+    document.getElementById('occupancy-total').innerText = capacity.total_spaces ?? 0;
+    document.getElementById('occupancy-free').innerText = capacity.available_spaces ?? 0;
+    document.getElementById('occupancy-percent').innerText = `${capacity.occupancy_rate ?? 0}%`;
+
+    if (!data.vehicles || data.vehicles.length === 0) {
+        container.innerHTML = '<p class="loading">Aktuell sind keine Autos im Parkhaus</p>';
+        return;
+    }
+
+    let html = '';
+    data.vehicles.forEach(v => {
+        const entryTime = v.entry_time ? new Date(v.entry_time).toLocaleString('de-DE') : 'Unbekannt';
+        const typeLabel = v.is_dauerparker ? 'Dauerparker' : 'Genehmigt';
+        const typeClass = v.is_dauerparker ? 'vehicle-type-dauerparker' : 'vehicle-type-approved';
+
+        html += `
+            <div class="data-item occupancy-item">
+                <div class="data-item-main">
+                    <span class="data-item-plate">${v.license_plate}</span>
+                    <span class="data-item-secondary">Einfahrt: ${entryTime}</span>
+                    <span class="data-item-secondary">Parkdauer: ${v.parking_duration_formatted}</span>
+                </div>
+                <div class="occupancy-item-side">
+                    <span class="vehicle-type ${typeClass}">${typeLabel}</span>
+                    <span class="data-item-value">${v.session_status}</span>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+function displayCostData(data, container) {
+    const totalCosts = document.getElementById('total-costs');
+    if (totalCosts) {
+        totalCosts.innerText = (data.total || 0).toFixed(2);
+    }
+
+    if (!data.vehicles || data.vehicles.length === 0) {
+        container.innerHTML = '<p class="loading">Keine offenen Zahlungen</p>';
+        return;
+    }
+
+    let html = '';
+    data.vehicles.forEach(v => {
+        const entryTime = v.entry_time ? new Date(v.entry_time).toLocaleString('de-DE') : 'Unbekannt';
+
+        html += `
+            <div class="data-item payment-item">
+                <div class="data-item-main">
+                    <span class="data-item-plate">${v.license_plate}</span>
+                    <span class="data-item-secondary">Start der Parkzeit: ${entryTime}</span>
+                    <span class="data-item-secondary">Aktuelle Parkdauer: ${v.parking_duration_formatted}</span>
+                </div>
+                <div class="payment-item-side">
+                    <div class="data-item-value highlight">${v.cost_calculated.toFixed(2)} €</div>
+                    <button class="btn-payment-check" onclick="confirmPayment(${v.session_id})" title="Gebühr bezahlt">✓</button>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
 // Lade Statistiken Modal
 function update() {
     fetch("/api/status")
@@ -226,6 +309,20 @@ function update() {
         document.getElementById("occupied-spaces").innerText = data.parking_capacity.occupied_spaces;
         document.getElementById("available-spaces").innerText = data.parking_capacity.available_spaces;
         document.getElementById("occupancy-rate").innerText = data.parking_capacity.occupancy_rate + "%";
+        const pendingCountPreview = document.getElementById('pending-count-preview');
+        const pendingTotalPreview = document.getElementById('pending-total-preview');
+        if (pendingCountPreview && pendingTotalPreview) {
+            pendingCountPreview.innerText = data.pending_payments.pending_count;
+            pendingTotalPreview.innerText = Number(data.pending_payments.total_amount_pending).toFixed(2);
+        }
+        const occupancyModal = document.getElementById('modal-occupancy');
+        if (occupancyModal && occupancyModal.classList.contains('active')) {
+            loadModalData('occupancy');
+        }
+        const costsModal = document.getElementById('modal-costs');
+        if (costsModal && costsModal.classList.contains('active')) {
+            loadModalData('costs');
+        }
 
         // Aktive Session aktualisieren
         if (data.active_session) {
@@ -258,6 +355,26 @@ function pay() {
     .catch(err => console.error("Fehler bei der Zahlung:", err));
 }
 
+async function confirmPayment(sessionId) {
+    try {
+        const response = await fetch(`/api/payment/${sessionId}`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+
+        if (data.status !== 'success') {
+            alert(`Fehler: ${data.message}`);
+            return;
+        }
+
+        loadModalData('costs');
+        update();
+    } catch (error) {
+        alert(`Fehler bei der Zahlung: ${error.message}`);
+        console.error('Fehler bei der Zahlung:', error);
+    }
+}
+
 // ==================== PLATE RECOGNITION FUNCTIONS ====================
 
 /**
@@ -266,7 +383,7 @@ function pay() {
 async function recognizePlate() {
     const resultDiv = document.getElementById("recognition-result");
     resultDiv.classList.remove("visible");
-    resultDiv.innerHTML = '<p style="text-align:center; color:#fff;">⏳ Erkenne...</p>';
+    resultDiv.innerHTML = '<p style="text-align:center; color:#fff;">Erkenne...</p>';
     resultDiv.classList.add("visible");
 
     try {
@@ -298,7 +415,7 @@ async function recognizeUpload(event) {
 
     const resultDiv = document.getElementById("recognition-result");
     resultDiv.classList.remove("visible");
-    resultDiv.innerHTML = '<p style="text-align:center; color:#fff;">⏳ Erkenne...</p>';
+    resultDiv.innerHTML = '<p style="text-align:center; color:#fff;">Erkenne...</p>';
     resultDiv.classList.add("visible");
 
     const formData = new FormData();
@@ -378,7 +495,7 @@ function displayRecognitionResult(data) {
     }
 
     html += '</div>';
-    html += `<button class="btn btn-recognize" onclick="showDetailModal('${encodeURIComponent(JSON.stringify(data))}')">📷 Details anzeigen</button>`;
+    html += `<button class="btn btn-recognize" onclick="showDetailModal('${encodeURIComponent(JSON.stringify(data))}')">Details anzeigen</button>`;
 
     resultDiv.innerHTML = html;
     resultDiv.classList.add("visible");
@@ -640,6 +757,11 @@ function displayProtocol(filter = 'all') {
             let html = '';
             filteredData.forEach(request => {
                 const dateTime = new Date(request.detected_at);
+                const date = dateTime.toLocaleDateString('de-DE', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
                 const time = dateTime.toLocaleTimeString('de-DE', {
                     hour: '2-digit',
                     minute: '2-digit',
@@ -652,10 +774,10 @@ function displayProtocol(filter = 'all') {
                     statusText = 'Ausstehend';
                     statusClass = 'status-pending';
                 } else if (request.approval_status === 'approved') {
-                    statusText = '✅ Genehmigt';
+                    statusText = 'Genehmigt';
                     statusClass = 'status-valid';
                 } else if (request.approval_status === 'rejected') {
-                    statusText = '❌ Abgelehnt';
+                    statusText = 'Abgelehnt';
                     statusClass = 'status-invalid';
                 }
 
@@ -666,7 +788,7 @@ function displayProtocol(filter = 'all') {
                     : 'confidence-low';
 
                 const dauerparkerBadge = request.is_dauerparker
-                    ? '<span class="dauerparker-badge">🏠 Dauerparker</span>'
+                    ? '<span class="dauerparker-badge">Dauerparker</span>'
                     : '-';
 
                 let actionBtns = '';
@@ -683,7 +805,10 @@ function displayProtocol(filter = 'all') {
 
                 html += `
                     <tr>
-                        <td>${time}</td>
+                        <td class="protocol-datetime">
+                            <span>${date}</span>
+                            <small>${time}</small>
+                        </td>
                         <td><strong>${request.license_plate}</strong></td>
                         <td><span class="${statusClass}">${statusText}</span></td>
                         <td><span class="${confidenceClass}">${request.ocr_confidence.toFixed(1)}%</span></td>
@@ -741,6 +866,7 @@ async function approveEntry(requestId) {
             console.log(`✓ Entry #${requestId} genehmigt`);
             // Aktualisiere die Protokoll-Tabelle
             displayProtocol('pending');
+            update();
         } else {
             alert(`✗ Fehler: ${data.message}`);
         }
