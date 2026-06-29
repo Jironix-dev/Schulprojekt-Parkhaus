@@ -834,12 +834,35 @@ h3 {
 
 .protocol-preview {
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    align-items: center;
 }
 
 .protocol-preview .preview-text {
     color: #a0a0a0;
     font-size: 0.95em;
     font-style: italic;
+    margin-top: 6px;
+}
+
+.protocol-preview-label {
+    color: #777;
+    font-size: 0.8em;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+#protocol-preview-plate {
+    color: #1e40af;
+    font-size: 1.4em;
+    line-height: 1.1;
+}
+
+#protocol-preview-detail {
+    color: #555;
+    font-size: 0.85em;
 }
 
 .protocol-filters {
@@ -847,6 +870,36 @@ h3 {
     gap: 10px;
     margin-bottom: 20px;
     flex-wrap: wrap;
+}
+
+.protocol-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #ddd;
+}
+
+.protocol-tab {
+    padding: 10px 14px;
+    border: none;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    color: #333;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.protocol-tab.active {
+    border-bottom-color: #1e40af;
+    color: #1e40af;
+}
+
+.protocol-panel {
+    display: none;
+}
+
+.protocol-panel.active {
+    display: block;
 }
 
 .filter-btn {

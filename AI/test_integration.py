@@ -43,7 +43,7 @@ def test_yolo_loading():
         
         if recognizer.model is None:
             print("  ⚠️  Warnung: YOLO-Modell nicht gefunden")
-            print("     Stelle sicher, dass best.pt unter AI/YOLO-Modell/train/weights/ liegt")
+            print("     Stelle sicher, dass best.pt unter AI/YOLO-Modell/ liegt")
             return False
         else:
             print("  ✓ YOLO-Modell geladen")

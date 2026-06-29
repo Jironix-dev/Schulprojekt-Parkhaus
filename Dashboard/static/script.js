@@ -323,6 +323,7 @@ function update() {
         if (costsModal && costsModal.classList.contains('active')) {
             loadModalData('costs');
         }
+        updateProtocolPreview();
 
         // Aktive Session aktualisieren
         if (data.active_session) {
@@ -339,6 +340,38 @@ function update() {
         document.getElementById("last-update").innerText = new Date().toLocaleString('de-DE');
     })
     .catch(err => console.error("Fehler beim Laden des Status:", err));
+}
+
+async function updateProtocolPreview() {
+    const typeElement = document.getElementById('protocol-preview-type');
+    const plateElement = document.getElementById('protocol-preview-plate');
+    const detailElement = document.getElementById('protocol-preview-detail');
+
+    if (!typeElement || !plateElement || !detailElement) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/widget/protocol-preview');
+        const data = await response.json();
+        const latest = data.latest;
+
+        if (!latest) {
+            typeElement.textContent = 'Letzte Aktion';
+            plateElement.textContent = '-';
+            detailElement.textContent = 'Noch keine Eintraege';
+            return;
+        }
+
+        const actionType = latest.type === 'exit' ? 'Ausfahrt' : 'Einfahrt';
+        const formatted = formatProtocolDate(latest.detected_at);
+
+        typeElement.textContent = actionType;
+        plateElement.textContent = latest.license_plate;
+        detailElement.textContent = `${latest.message} · ${formatted.time}`;
+    } catch (error) {
+        console.error('Fehler beim Laden der Protokoll-Vorschau:', error);
+    }
 }
 
 function pay() {
@@ -699,17 +732,15 @@ async function deleteDauerparker(license_plate) {
 // Speichere aktuell gefilterte Daten für schnelle Filter-Umschaltung
 let protocolData = [];
 let currentProtocolFilter = 'all';
+let currentProtocolTab = 'entry';
 
 async function loadProtocolModal() {
     try {
-        const response = await fetch('/api/widget/detection-protocol');
-        const data = await response.json();
-
-        protocolData = data.detections || [];
-        document.getElementById('protocol-count').innerText = data.count;
-
-        // Zeige die Daten mit aktuellem Filter
-        displayProtocol(currentProtocolFilter);
+        if (currentProtocolTab === 'exit') {
+            loadExitProtocol();
+        } else {
+            displayProtocol(currentProtocolFilter);
+        }
     } catch (error) {
         console.error('Fehler beim Laden des Protokolls:', error);
         document.getElementById('protocol-list').innerHTML = `
@@ -718,6 +749,45 @@ async function loadProtocolModal() {
             </tr>
         `;
     }
+}
+
+function switchProtocolTab(tab) {
+    currentProtocolTab = tab;
+
+    document.querySelectorAll('.protocol-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-tab') === tab);
+    });
+
+    document.getElementById('entry-protocol-panel').classList.toggle('active', tab === 'entry');
+    document.getElementById('exit-protocol-panel').classList.toggle('active', tab === 'exit');
+
+    if (tab === 'exit') {
+        loadExitProtocol();
+    } else {
+        displayProtocol(currentProtocolFilter);
+    }
+}
+
+function formatProtocolDate(value) {
+    if (!value) return { date: '-', time: '-' };
+
+    const dateTime = new Date(value.replace(' ', 'T'));
+    if (Number.isNaN(dateTime.getTime())) {
+        return { date: value, time: '' };
+    }
+
+    return {
+        date: dateTime.toLocaleDateString('de-DE', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        }),
+        time: dateTime.toLocaleTimeString('de-DE', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        })
+    };
 }
 
 function displayProtocol(filter = 'all') {
@@ -756,17 +826,7 @@ function displayProtocol(filter = 'all') {
             // Baue Tabelle
             let html = '';
             filteredData.forEach(request => {
-                const dateTime = new Date(request.detected_at);
-                const date = dateTime.toLocaleDateString('de-DE', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric'
-                });
-                const time = dateTime.toLocaleTimeString('de-DE', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                });
+                const { date, time } = formatProtocolDate(request.detected_at);
 
                 let statusText = '';
                 let statusClass = '';
@@ -839,7 +899,63 @@ function displayProtocol(filter = 'all') {
                     <td colspan="6" class="error">Fehler beim Laden</td>
                 </tr>
             `;
+            });
+}
+
+async function loadExitProtocol() {
+    const tbody = document.getElementById('exit-protocol-list');
+
+    try {
+        const response = await fetch('/api/exit/requests');
+        const data = await response.json();
+
+        if (!data.data || data.data.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="loading">Keine Ausfahrtsversuche vorhanden</td>
+                </tr>
+            `;
+            document.getElementById('exit-protocol-count').textContent = '0';
+            return;
+        }
+
+        let html = '';
+        data.data.forEach(request => {
+            const detected = formatProtocolDate(request.detected_at);
+            const deadline = formatProtocolDate(request.exit_deadline);
+            const isAllowed = request.exit_status === 'allowed';
+            const isPaymentRequired = request.exit_status === 'payment_required';
+            const statusClass = isAllowed ? 'status-valid' : 'status-invalid';
+            const statusText = isAllowed ? 'Darf raus' : 'Darf nicht raus';
+            const paymentText = request.payment_confirmed ? 'Bezahlt' : 'Offen';
+            const paymentClass = request.payment_confirmed ? 'status-valid' : 'status-invalid';
+            const deadlineText = request.exit_deadline ? `${deadline.date} ${deadline.time}` : '-';
+
+            html += `
+                <tr>
+                    <td class="protocol-datetime">
+                        <span>${detected.date}</span>
+                        <small>${detected.time}</small>
+                    </td>
+                    <td><strong>${request.license_plate}</strong></td>
+                    <td><span class="${statusClass}">${statusText}</span></td>
+                    <td><span class="${paymentClass}">${paymentText}</span></td>
+                    <td>${deadlineText}</td>
+                    <td>${isPaymentRequired ? 'Erst bezahlen' : request.message}</td>
+                </tr>
+            `;
         });
+
+        tbody.innerHTML = html;
+        document.getElementById('exit-protocol-count').textContent = data.count;
+    } catch (error) {
+        console.error('Fehler beim Laden des Ausfahrtsprotokolls:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="error">Fehler beim Laden</td>
+            </tr>
+        `;
+    }
 }
 
 function filterEntries(filter) {

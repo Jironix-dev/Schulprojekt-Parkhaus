@@ -32,7 +32,19 @@ logger = logging.getLogger(__name__)
 # YOLO Modell Konfiguration
 YOLO_CONF_THRESHOLD = 0.45
 YOLO_IOU_THRESHOLD = 0.5
-MODEL_PATH = Path(__file__).parent / "YOLO-Modell" / "train" / "weights" / "best.pt"
+AI_DIR = Path(__file__).parent
+MODEL_CANDIDATES = (
+    AI_DIR / "YOLO-Modell" / "best.pt",
+    AI_DIR / "YOLO-Modell" / "train" / "weights" / "best.pt",
+)
+
+
+def resolve_model_path() -> Path:
+    """Gibt den ersten vorhandenen YOLO-Modellpfad zurück."""
+    for candidate in MODEL_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return MODEL_CANDIDATES[0]
 
 
 class PlateRecognizer:
@@ -55,7 +67,7 @@ class PlateRecognizer:
         
         # Verwende übergebenen Pfad oder default
         if model_path is None:
-            model_path = str(MODEL_PATH)
+            model_path = str(resolve_model_path())
         
         self.model_path = model_path
         self.model = None

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.database.db import db
 from backend.services.dashboard_service import DashboardService
+from backend.services.exit_service import ExitService
 from backend.services.plate_recognition_service import PlateRecognitionService
 from livefeed import generate_stream, get_static_frame, live_feed
 
@@ -98,6 +99,41 @@ def start_mqtt_for_auto_approved_dauerparker(license_plate: str) -> None:
         and entry_request["is_dauerparker"]
     ):
         start_mqtt_gate_sequence(license_plate)
+
+
+def handle_recognized_plate(license_plate: str, ocr_confidence: float) -> dict:
+    """Verarbeitet ein erkanntes Kennzeichen als Ausfahrt oder Einfahrt."""
+    if ExitService.has_active_session(license_plate):
+        success, message, exit_log = ExitService.process_exit_detection(license_plate)
+        logs.append({
+            "time": time.strftime("%H:%M:%S"),
+            "event": f"Ausfahrt {'erlaubt' if success else 'verweigert'}: {license_plate} - {message}"
+        })
+        return {
+            "flow": "exit",
+            "success": success,
+            "message": message,
+            "exit": exit_log
+        }
+
+    success, message = DashboardService.save_entry_request(license_plate, ocr_confidence)
+    if success:
+        logs.append({
+            "time": time.strftime("%H:%M:%S"),
+            "event": f"Entry Request: {license_plate} {message}"
+        })
+        start_mqtt_for_auto_approved_dauerparker(license_plate)
+    else:
+        logs.append({
+            "time": time.strftime("%H:%M:%S"),
+            "event": f"Entry Request ignoriert: {license_plate} - {message}"
+        })
+
+    return {
+        "flow": "entry",
+        "success": success,
+        "message": message
+    }
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
@@ -329,6 +365,18 @@ def get_detection_protocol():
         return {"error": str(e), "detections": [], "count": 0}
 
 
+@router.get("/api/widget/protocol-preview")
+def get_protocol_preview():
+    """Widget-Vorschau: letzte Protokollaktion aus Einfahrt oder Ausfahrt."""
+    try:
+        return {
+            "status": "success",
+            "latest": DashboardService.get_latest_protocol_action()
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "latest": None}
+
+
 # ==================== Live-Feed Endpoints ====================
 
 @router.get("/api/stream")
@@ -416,14 +464,7 @@ async def detect_plate_from_camera():
         if result.get("success") and result.get("detected_plate"):
             license_plate = result["detected_plate"].strip()
             ocr_confidence = result.get("ocr_confidence", 0.0)
-            
-            success, message = DashboardService.save_entry_request(license_plate, ocr_confidence)
-            if success:
-                logs.append({
-                    "time": time.strftime("%H:%M:%S"),
-                    "event": f"Entry Request: {license_plate} {message}"
-                })
-                start_mqtt_for_auto_approved_dauerparker(license_plate)
+            result["parking_flow"] = handle_recognized_plate(license_plate, ocr_confidence)
         
         return JSONResponse(result)
         
@@ -468,16 +509,7 @@ async def detect_plate_from_upload(file: UploadFile = File(...)):
         if result.get("success") and result.get("detected_plate"):
             license_plate = result["detected_plate"].strip()
             ocr_confidence = result.get("ocr_confidence", 0.0)
-            
-            success, message = DashboardService.save_entry_request(license_plate, ocr_confidence)
-            
-            status = "✓ GÜLTIG" if success else "⚠️ UNGÜLTIG"
-            logs.append({
-                "time": time.strftime("%H:%M:%S"),
-                "event": f"{status}: {license_plate} - {message}"
-            })
-            if success:
-                start_mqtt_for_auto_approved_dauerparker(license_plate)
+            result["parking_flow"] = handle_recognized_plate(license_plate, ocr_confidence)
         elif result.get("detected_plate"):
             # Ungültiges Kennzeichen erkannt
             logs.append({
@@ -587,6 +619,22 @@ def get_entry_requests(limit: int = 50):
     """
     try:
         requests = DashboardService.get_entry_requests(limit)
+        return {
+            "status": "success",
+            "data": requests,
+            "count": len(requests)
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/api/exit/requests")
+def get_exit_requests(limit: int = 100):
+    """
+    Ruft alle Ausfahrtsversuche ab.
+    """
+    try:
+        requests = ExitService.get_exit_protocol(limit)
         return {
             "status": "success",
             "data": requests,

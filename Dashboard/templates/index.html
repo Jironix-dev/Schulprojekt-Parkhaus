@@ -88,7 +88,10 @@
             <div class="card protocol-card clickable" onclick="openModal('protocol')">
                 <h3>Protokoll</h3>
                 <div class="protocol-preview">
-                    <p class="preview-text">Erkannte Kennzeichen anzeigen →</p>
+                    <span class="protocol-preview-label" id="protocol-preview-type">Letzte Aktion</span>
+                    <strong id="protocol-preview-plate">-</strong>
+                    <small id="protocol-preview-detail">Noch keine Eintraege</small>
+                    <p class="preview-text">Gesamtes Protokoll anzeigen →</p>
                 </div>
             </div>
 
@@ -378,39 +381,72 @@
 <div id="modal-protocol" class="modal">
     <div class="modal-content modal-protocol">
         <div class="modal-header">
-            <h2>📋 Einfahrts-Anfragen</h2>
+            <h2>📋 Protokoll</h2>
             <button class="modal-close" onclick="closeModal('protocol')">&times;</button>
         </div>
         <div class="modal-body">
-            <div class="protocol-filters">
-                <button class="filter-btn active" onclick="filterEntries('all')" data-filter="all">Alle</button>
-                <button class="filter-btn" onclick="filterEntries('pending')" data-filter="pending">⏳ Ausstehend</button>
-                <button class="filter-btn" onclick="filterEntries('approved')" data-filter="approved">✅ Genehmigt</button>
-                <button class="filter-btn" onclick="filterEntries('rejected')" data-filter="rejected">❌ Abgelehnt</button>
+            <div class="protocol-tabs">
+                <button class="protocol-tab active" onclick="switchProtocolTab('entry')" data-tab="entry">Einfahrt-Protokoll</button>
+                <button class="protocol-tab" onclick="switchProtocolTab('exit')" data-tab="exit">Ausfahrts-Protokoll</button>
             </div>
-            
-            <div class="protocol-table-container">
-                <table class="protocol-table">
-                    <thead>
-                        <tr>
-                            <th>Datum / Uhrzeit</th>
-                            <th>Kennzeichen</th>
-                            <th>Status</th>
-                            <th>Konfidenz</th>
-                            <th>Dauerparker</th>
-                            <th>Aktion</th>
-                        </tr>
-                    </thead>
-                    <tbody id="protocol-list">
-                        <tr>
-                            <td colspan="6" class="loading">Laden...</td>
-                        </tr>
-                    </tbody>
-                </table>
+
+            <div id="entry-protocol-panel" class="protocol-panel active">
+                <div class="protocol-filters">
+                    <button class="filter-btn active" onclick="filterEntries('all')" data-filter="all">Alle</button>
+                    <button class="filter-btn" onclick="filterEntries('pending')" data-filter="pending">⏳ Ausstehend</button>
+                    <button class="filter-btn" onclick="filterEntries('approved')" data-filter="approved">✅ Genehmigt</button>
+                    <button class="filter-btn" onclick="filterEntries('rejected')" data-filter="rejected">❌ Abgelehnt</button>
+                </div>
+                
+                <div class="protocol-table-container">
+                    <table class="protocol-table">
+                        <thead>
+                            <tr>
+                                <th>Datum / Uhrzeit</th>
+                                <th>Kennzeichen</th>
+                                <th>Status</th>
+                                <th>Konfidenz</th>
+                                <th>Dauerparker</th>
+                                <th>Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="protocol-list">
+                            <tr>
+                                <td colspan="6" class="loading">Laden...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="modal-summary">
+                    <strong>Ausstehende Anfragen:</strong> <span id="protocol-count">0</span>
+                </div>
             </div>
-            
-            <div class="modal-summary">
-                <strong>Ausstehende Anfragen:</strong> <span id="protocol-count">0</span>
+
+            <div id="exit-protocol-panel" class="protocol-panel">
+                <div class="protocol-table-container">
+                    <table class="protocol-table">
+                        <thead>
+                            <tr>
+                                <th>Datum / Uhrzeit</th>
+                                <th>Kennzeichen</th>
+                                <th>Entscheidung</th>
+                                <th>Zahlung</th>
+                                <th>Frist</th>
+                                <th>Hinweis</th>
+                            </tr>
+                        </thead>
+                        <tbody id="exit-protocol-list">
+                            <tr>
+                                <td colspan="6" class="loading">Laden...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="modal-summary">
+                    <strong>Ausfahrtsversuche:</strong> <span id="exit-protocol-count">0</span>
+                </div>
             </div>
         </div>
     </div>

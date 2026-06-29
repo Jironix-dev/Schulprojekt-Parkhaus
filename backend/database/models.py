@@ -96,6 +96,22 @@ SCHEMA = {
             approved_at TIMESTAMP,
             notes TEXT
         )
+    ''',
+
+    'exit_requests': '''
+        CREATE TABLE IF NOT EXISTS exit_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            license_plate TEXT NOT NULL,
+            detected_at TIMESTAMP NOT NULL,
+            session_id INTEGER,
+            exit_status TEXT NOT NULL,
+            message TEXT,
+            payment_confirmed INTEGER DEFAULT 0,
+            payment_confirmed_at TIMESTAMP,
+            exit_deadline TIMESTAMP,
+            completed_at TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES parking_sessions(id)
+        )
     '''
 }
 

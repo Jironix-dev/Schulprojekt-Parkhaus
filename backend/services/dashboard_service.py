@@ -25,9 +25,9 @@ class DashboardService:
             SET occupied_spaces = (
                 SELECT COUNT(*)
                 FROM parking_sessions
-                WHERE exit_time IS NULL AND status = 'parked'
+                WHERE exit_time IS NULL
             ),
-            last_updated = datetime('now')
+            last_updated = datetime('now', 'localtime')
             WHERE id = 1
         """)
         db.commit()
@@ -499,7 +499,7 @@ class DashboardService:
             SELECT 
                 pd.id,
                 pd.detected_plate,
-                pd.detected_at,
+                datetime(pd.detected_at, 'localtime') AS detected_at,
                 pd.is_valid,
                 pd.confidence_score,
                 pd.raw_ocr_text,
@@ -543,6 +543,35 @@ class DashboardService:
         
         try:
             cursor = db.get_cursor()
+
+            license_plate = PlateValidator.normalize(license_plate)
+
+            cursor.execute("""
+                SELECT id
+                FROM entry_requests
+                WHERE license_plate = ?
+                  AND approval_status = 'pending'
+                ORDER BY detected_at DESC
+                LIMIT 1
+            """, (license_plate,))
+            pending_request = cursor.fetchone()
+
+            if pending_request:
+                return False, "Anfrage wartet bereits auf Bestätigung"
+
+            cursor.execute("""
+                SELECT ps.id
+                FROM parking_sessions ps
+                JOIN vehicles v ON ps.vehicle_id = v.id
+                WHERE v.license_plate = ?
+                  AND ps.exit_time IS NULL
+                ORDER BY ps.entry_time DESC
+                LIMIT 1
+            """, (license_plate,))
+            active_session = cursor.fetchone()
+
+            if active_session:
+                return False, "Auto ist bereits im Parkhaus"
             
             # Prüfe ob es ein Dauerparker ist
             cursor.execute("SELECT id FROM vehicles WHERE license_plate = ? AND status = 'dauerparker'", (license_plate,))
@@ -597,11 +626,18 @@ class DashboardService:
             SELECT 
                 id,
                 license_plate,
-                detected_at,
+                datetime(detected_at, 'localtime') AS detected_at,
                 ocr_confidence,
                 approval_status,
                 is_dauerparker
             FROM entry_requests
+            WHERE approval_status != 'pending'
+               OR id IN (
+                    SELECT MAX(id)
+                    FROM entry_requests
+                    WHERE approval_status = 'pending'
+                    GROUP BY license_plate
+               )
             ORDER BY detected_at DESC
             LIMIT ?
         """, (limit,))
@@ -618,6 +654,55 @@ class DashboardService:
             }
             for row in results
         ]
+
+    @staticmethod
+    def get_latest_protocol_action() -> Optional[Dict[str, Any]]:
+        """Ruft die letzte Protokollaktion aus Einfahrt oder Ausfahrt ab."""
+        cursor = db.get_cursor()
+        cursor.execute("""
+            SELECT
+                protocol_type,
+                license_plate,
+                action_time,
+                status,
+                message
+            FROM (
+                SELECT
+                    'entry' AS protocol_type,
+                    license_plate,
+                    datetime(detected_at, 'localtime') AS action_time,
+                    approval_status AS status,
+                    CASE
+                        WHEN approval_status = 'pending' THEN 'Wartet auf Bestaetigung'
+                        WHEN approval_status = 'approved' THEN 'Einfahrt genehmigt'
+                        WHEN approval_status = 'rejected' THEN 'Einfahrt abgelehnt'
+                        ELSE approval_status
+                    END AS message
+                FROM entry_requests
+                UNION ALL
+                SELECT
+                    'exit' AS protocol_type,
+                    license_plate,
+                    detected_at AS action_time,
+                    exit_status AS status,
+                    message
+                FROM exit_requests
+            )
+            ORDER BY action_time DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        return {
+            'type': row[0],
+            'license_plate': row[1],
+            'detected_at': row[2],
+            'status': row[3],
+            'message': row[4],
+        }
     
     @staticmethod
     def approve_entry_request(request_id: int) -> Tuple[bool, str]:
@@ -634,7 +719,7 @@ class DashboardService:
             cursor = db.get_cursor()
 
             cursor.execute("""
-                SELECT license_plate, is_dauerparker
+                SELECT license_plate, is_dauerparker, approval_status
                 FROM entry_requests
                 WHERE id = ?
             """, (request_id,))
@@ -643,11 +728,20 @@ class DashboardService:
             if not request:
                 return False, "Entry Request nicht gefunden"
             
-            cursor.execute("""
-                UPDATE entry_requests
-                SET approval_status = 'approved', approved_at = ?
-                WHERE id = ?
-            """, (DashboardService._now_db(), request_id))
+            approved_at = DashboardService._now_db()
+            if request[2] == 'pending':
+                cursor.execute("""
+                    UPDATE entry_requests
+                    SET approval_status = 'approved', approved_at = ?
+                    WHERE license_plate = ?
+                      AND approval_status = 'pending'
+                """, (approved_at, request[0]))
+            else:
+                cursor.execute("""
+                    UPDATE entry_requests
+                    SET approval_status = 'approved', approved_at = ?
+                    WHERE id = ?
+                """, (approved_at, request_id))
             db.commit()
 
             _, session_message = DashboardService._start_parking_session_for_plate(
@@ -673,15 +767,33 @@ class DashboardService:
         """
         try:
             cursor = db.get_cursor()
-            
+
             cursor.execute("""
-                UPDATE entry_requests
-                SET approval_status = 'rejected', approved_at = ?
+                SELECT license_plate, approval_status
+                FROM entry_requests
                 WHERE id = ?
-            """, (DashboardService._now_db(), request_id))
-            db.commit()
-            if cursor.rowcount == 0:
+            """, (request_id,))
+            request = cursor.fetchone()
+
+            if not request:
                 return False, "Entry Request nicht gefunden"
+
+            rejected_at = DashboardService._now_db()
+            if request[1] == 'pending':
+                cursor.execute("""
+                    UPDATE entry_requests
+                    SET approval_status = 'rejected', approved_at = ?
+                    WHERE license_plate = ?
+                      AND approval_status = 'pending'
+                """, (rejected_at, request[0]))
+            else:
+                cursor.execute("""
+                    UPDATE entry_requests
+                    SET approval_status = 'rejected', approved_at = ?
+                    WHERE id = ?
+                """, (rejected_at, request_id))
+            
+            db.commit()
             
             return True, "Entry abgelehnt"
             
@@ -690,7 +802,7 @@ class DashboardService:
 
     @staticmethod
     def confirm_session_payment(session_id: int) -> Tuple[bool, str, Optional[float]]:
-        """Bestaetigt die Zahlung und beendet damit die Parkdauer."""
+        """Bestaetigt die Zahlung und oeffnet das Ausfahrtsfenster."""
         try:
             cursor = db.get_cursor()
             cursor.execute("""
@@ -698,6 +810,7 @@ class DashboardService:
                     ps.entry_time,
                     ps.exit_time,
                     ps.payment_confirmed,
+                    ps.payment_confirmed_at,
                     v.status,
                     v.license_plate
                 FROM parking_sessions ps
@@ -708,21 +821,27 @@ class DashboardService:
 
             if not row:
                 return False, "Park-Session nicht gefunden", None
-            if row[3] == 'dauerparker':
+            if row[4] == 'dauerparker':
                 return False, "Dauerparker muessen keine Parkgebuehr bezahlen", None
-            if row[2]:
-                return False, "Parkgebuehr wurde bereits bezahlt", None
+            if row[1] is not None:
+                return False, "Park-Session ist bereits beendet", None
 
             entry_time = datetime.fromisoformat(row[0]) if isinstance(row[0], str) else row[0]
             payment_time = datetime.now()
+            previous_payment_time = datetime.fromisoformat(row[3]) if isinstance(row[3], str) else row[3]
+
+            if row[2] and previous_payment_time:
+                deadline = previous_payment_time + timedelta(minutes=3)
+                if payment_time <= deadline:
+                    return False, "Parkgebuehr wurde bereits bezahlt. Ausfahrtsfenster ist noch offen", None
+
             parking_seconds = int((payment_time - entry_time).total_seconds())
             parking_minutes = max(0, int(parking_seconds / 60))
             cost = PaymentCalculator.calculate_from_seconds(parking_seconds)
 
             cursor.execute("""
                 UPDATE parking_sessions
-                SET exit_time = ?,
-                    status = 'payment_confirmed',
+                SET status = 'payment_confirmed',
                     parking_duration_minutes = ?,
                     cost_calculated = ?,
                     cost_paid = ?,
@@ -730,7 +849,6 @@ class DashboardService:
                     payment_confirmed_at = ?
                 WHERE id = ?
             """, (
-                payment_time,
                 parking_minutes,
                 cost,
                 cost,
@@ -738,19 +856,8 @@ class DashboardService:
                 session_id
             ))
 
-            cursor.execute("""
-                UPDATE parking_capacity
-                SET occupied_spaces = (
-                    SELECT COUNT(*)
-                    FROM parking_sessions
-                    WHERE exit_time IS NULL AND status = 'parked'
-                ),
-                last_updated = datetime('now')
-                WHERE id = 1
-            """)
-
             db.commit()
-            return True, f"Zahlung fuer {row[4]} bestaetigt", cost
+            return True, f"Zahlung fuer {row[5]} bestaetigt. Ausfahrt innerhalb von 3 Minuten moeglich", cost
 
         except Exception as e:
             return False, f"Fehler: {str(e)}", None
@@ -766,7 +873,6 @@ class DashboardService:
             LEFT JOIN parking_sessions ps
                 ON ps.vehicle_id = v.id
                 AND ps.exit_time IS NULL
-                AND ps.status = 'parked'
             WHERE v.license_plate = ?
             ORDER BY ps.entry_time DESC
             LIMIT 1
@@ -818,9 +924,9 @@ class DashboardService:
             SET occupied_spaces = (
                 SELECT COUNT(*)
                 FROM parking_sessions
-                WHERE exit_time IS NULL AND status = 'parked'
+                WHERE exit_time IS NULL
             ),
-            last_updated = datetime('now')
+            last_updated = datetime('now', 'localtime')
             WHERE id = 1
         """)
 
