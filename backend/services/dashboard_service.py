@@ -529,7 +529,7 @@ class DashboardService:
         Wird aufgerufen wenn OCR ein gültiges Kennzeichen erkennt.
         
         Args:
-            license_plate: Erkanntes Kennzeichen im Format \"X 1234\"
+            license_plate: Erkanntes Kennzeichen im Format "X 1234"
             ocr_confidence: OCR Konfidenz (0-1)
         
         Returns:
@@ -572,44 +572,65 @@ class DashboardService:
 
             if active_session:
                 return False, "Auto ist bereits im Parkhaus"
-            
-            # Prüfe ob es ein Dauerparker ist
-            cursor.execute("SELECT id FROM vehicles WHERE license_plate = ? AND status = 'dauerparker'", (license_plate,))
-            is_dauerparker = cursor.fetchone() is not None
-            
-            # Bestimme Approval Status: Dauerparker werden automatisch genehmigt
-            approval_status = 'approved' if is_dauerparker else 'pending'
-            approved_at = DashboardService._now_db() if is_dauerparker else None
+
+            cursor.execute("""
+                SELECT status
+                FROM vehicles
+                WHERE license_plate = ?
+            """, (license_plate,))
+            vehicle_row = cursor.fetchone()
+
+            vehicle_status = vehicle_row[0] if vehicle_row else None
+            is_dauerparker = vehicle_status == 'dauerparker'
+            is_known_plate = vehicle_status == 'approved'
+
+            # Dauerparker und bekannte Kennzeichen duerfen direkt einfahren.
+            approval_status = 'approved' if (is_dauerparker or is_known_plate) else 'pending'
+            approved_at = DashboardService._now_db() if approval_status == 'approved' else None
+
+            entry_note = "Bestaetigung erforderlich"
+            if is_dauerparker:
+                entry_note = "Auto-genehmigt: Dauerparker"
+            elif is_known_plate:
+                entry_note = "Bekanntes Kennzeichen - automatische Einfahrt"
+
             started_session = False
             session_message = ""
 
-            if is_dauerparker:
+            if approval_status == 'approved':
                 started_session, session_message = DashboardService._start_parking_session_for_plate(
                     license_plate,
-                    is_dauerparker=True
+                    is_dauerparker=is_dauerparker
                 )
-            
-            # Speichere Entry Request
+
             cursor.execute("""
-                INSERT INTO entry_requests (license_plate, ocr_confidence, approval_status, is_dauerparker, approved_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO entry_requests (license_plate, ocr_confidence, approval_status, is_dauerparker, approved_at, notes)
+                VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 license_plate,
                 ocr_confidence,
                 approval_status,
                 1 if is_dauerparker else 0,
-                approved_at
+                approved_at,
+                entry_note
             ))
             db.commit()
-            
-            status_msg = "(Auto-genehmigt: Dauerparker)" if is_dauerparker else "(Bestätigung erforderlich)"
+
+            if is_dauerparker:
+                status_msg = "(Auto-genehmigt: Dauerparker)"
+            elif is_known_plate:
+                status_msg = "(Bekanntes Kennzeichen - automatische Einfahrt)"
+            else:
+                status_msg = "(Bestätigung erforderlich)"
+
             if started_session:
                 status_msg = f"{status_msg} - {session_message}"
+
             return True, f"Anfrage gespeichert {status_msg}"
             
         except Exception as e:
             return False, f"Fehler beim Speichern: {str(e)}"
-    
+
     @staticmethod
     def get_entry_requests(limit: int = 50) -> list:
         """
@@ -629,7 +650,8 @@ class DashboardService:
                 datetime(detected_at, 'localtime') AS detected_at,
                 ocr_confidence,
                 approval_status,
-                is_dauerparker
+                is_dauerparker,
+                COALESCE(notes, '')
             FROM entry_requests
             WHERE approval_status != 'pending'
                OR id IN (
@@ -650,7 +672,8 @@ class DashboardService:
                 'detected_at': row[2],
                 'ocr_confidence': round(row[3] * 100, 1) if row[3] else 0,
                 'approval_status': row[4],
-                'is_dauerparker': bool(row[5])
+                'is_dauerparker': bool(row[5]),
+                'notes': row[6]
             }
             for row in results
         ]
@@ -672,12 +695,15 @@ class DashboardService:
                     license_plate,
                     datetime(detected_at, 'localtime') AS action_time,
                     approval_status AS status,
-                    CASE
-                        WHEN approval_status = 'pending' THEN 'Wartet auf Bestaetigung'
-                        WHEN approval_status = 'approved' THEN 'Einfahrt genehmigt'
-                        WHEN approval_status = 'rejected' THEN 'Einfahrt abgelehnt'
-                        ELSE approval_status
-                    END AS message
+                    COALESCE(
+                        notes,
+                        CASE
+                            WHEN approval_status = 'pending' THEN 'Wartet auf Bestaetigung'
+                            WHEN approval_status = 'approved' THEN 'Einfahrt genehmigt'
+                            WHEN approval_status = 'rejected' THEN 'Einfahrt abgelehnt'
+                            ELSE approval_status
+                        END
+                    ) AS message
                 FROM entry_requests
                 UNION ALL
                 SELECT
@@ -732,14 +758,18 @@ class DashboardService:
             if request[2] == 'pending':
                 cursor.execute("""
                     UPDATE entry_requests
-                    SET approval_status = 'approved', approved_at = ?
+                    SET approval_status = 'approved',
+                        approved_at = ?,
+                        notes = 'Manuell genehmigt'
                     WHERE license_plate = ?
                       AND approval_status = 'pending'
                 """, (approved_at, request[0]))
             else:
                 cursor.execute("""
                     UPDATE entry_requests
-                    SET approval_status = 'approved', approved_at = ?
+                    SET approval_status = 'approved',
+                        approved_at = ?,
+                        notes = COALESCE(notes, 'Manuell genehmigt')
                     WHERE id = ?
                 """, (approved_at, request_id))
             db.commit()
@@ -782,14 +812,18 @@ class DashboardService:
             if request[1] == 'pending':
                 cursor.execute("""
                     UPDATE entry_requests
-                    SET approval_status = 'rejected', approved_at = ?
+                    SET approval_status = 'rejected',
+                        approved_at = ?,
+                        notes = 'Manuell abgelehnt'
                     WHERE license_plate = ?
                       AND approval_status = 'pending'
                 """, (rejected_at, request[0]))
             else:
                 cursor.execute("""
                     UPDATE entry_requests
-                    SET approval_status = 'rejected', approved_at = ?
+                    SET approval_status = 'rejected',
+                        approved_at = ?,
+                        notes = COALESCE(notes, 'Manuell abgelehnt')
                     WHERE id = ?
                 """, (rejected_at, request_id))
             

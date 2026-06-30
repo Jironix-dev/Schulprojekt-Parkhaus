@@ -89,14 +89,13 @@ def get_latest_entry_request_for_plate(license_plate: str) -> dict | None:
     }
 
 
-def start_mqtt_for_auto_approved_dauerparker(license_plate: str) -> None:
-    """Oeffnet Ampel/Schranke nur bei automatisch genehmigten Dauerparkern."""
+def start_mqtt_for_auto_approved_entry(license_plate: str) -> None:
+    """Oeffnet Ampel/Schranke bei automatisch genehmigten Einfahrten."""
     entry_request = get_latest_entry_request_for_plate(license_plate)
 
     if (
         entry_request
         and entry_request["approval_status"] == "approved"
-        and entry_request["is_dauerparker"]
     ):
         start_mqtt_gate_sequence(license_plate)
 
@@ -122,7 +121,7 @@ def handle_recognized_plate(license_plate: str, ocr_confidence: float) -> dict:
             "time": time.strftime("%H:%M:%S"),
             "event": f"Entry Request: {license_plate} {message}"
         })
-        start_mqtt_for_auto_approved_dauerparker(license_plate)
+        start_mqtt_for_auto_approved_entry(license_plate)
     else:
         logs.append({
             "time": time.strftime("%H:%M:%S"),
