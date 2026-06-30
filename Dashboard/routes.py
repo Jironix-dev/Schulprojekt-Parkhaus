@@ -18,9 +18,19 @@ from backend.services.plate_recognition_service import PlateRecognitionService
 from livefeed import generate_stream, get_static_frame, live_feed
 
 try:
-    from .mqtt_parking_control import start_parking_sequence_async
+    from .mqtt_parking_control import (
+        get_mqtt_esp_status,
+        get_mqtt_monitor_entries,
+        start_exit_sequence_async,
+        start_parking_sequence_async,
+    )
 except ImportError:
-    from mqtt_parking_control import start_parking_sequence_async
+    from mqtt_parking_control import (
+        get_mqtt_esp_status,
+        get_mqtt_monitor_entries,
+        start_exit_sequence_async,
+        start_parking_sequence_async,
+    )
 
 router = APIRouter()
 # Pfad zum templates-Verzeichnis
@@ -44,6 +54,15 @@ def start_mqtt_gate_sequence(license_plate: str) -> None:
     logs.append({
         "time": time.strftime("%H:%M:%S"),
         "event": f"MQTT-Ablauf gestartet für {license_plate}"
+    })
+
+
+def start_mqtt_exit_sequence(license_plate: str) -> None:
+    """Startet Ampel- und Schrankenablauf fuer eine erlaubte Ausfahrt."""
+    start_exit_sequence_async()
+    logs.append({
+        "time": time.strftime("%H:%M:%S"),
+        "event": f"MQTT-Ausfahrtsablauf gestartet für {license_plate}"
     })
 
 
@@ -109,6 +128,8 @@ def handle_recognized_plate(license_plate: str, ocr_confidence: float) -> dict:
             "time": time.strftime("%H:%M:%S"),
             "event": f"Ausfahrt {'erlaubt' if success else 'verweigert'}: {license_plate} - {message}"
         })
+        if success:
+            start_mqtt_exit_sequence(license_plate)
         return {
             "flow": "exit",
             "success": success,
@@ -375,6 +396,21 @@ def get_protocol_preview():
         }
     except Exception as e:
         return {"status": "error", "message": str(e), "latest": None}
+
+
+@router.get("/api/widget/mqtt-monitor")
+def get_mqtt_monitor(limit: int = 100):
+    """Widget: MQTT-Befehle und ESP32-Statusmeldungen."""
+    try:
+        entries = get_mqtt_monitor_entries(limit)
+        return {
+            "title": "MQTT-Monitor",
+            "messages": entries,
+            "count": len(entries),
+            "esp_status": get_mqtt_esp_status(),
+        }
+    except Exception as e:
+        return {"error": str(e), "messages": [], "count": 0}
 
 
 # ==================== Live-Feed Endpoints ====================

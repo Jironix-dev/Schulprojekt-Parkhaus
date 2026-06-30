@@ -95,26 +95,38 @@
                 </div>
             </div>
 
-            <!-- Ausstehende Zahlungen & Bekannte Kennzeichen (nebeneinander) -->
+            <!-- Ausstehende Zahlungen, Dauerparker, Kostenmodell und MQTT-Monitor -->
             <div class="bottom-widgets-row">
-                <div class="card pending-card clickable" onclick="openModal('costs')">
-                    <h3>Ausstehende Zahlungen</h3>
-                    <div class="pending-widget-summary">
-                        <span id="pending-count-preview">{{ data.pending_payments.pending_count }}</span>
-                        <small>offen</small>
-                        <strong><span id="pending-total-preview">{{ "%.2f"|format(data.pending_payments.total_amount_pending) }}</span> €</strong>
+                <div class="widget-stack">
+                    <div class="card pending-card clickable" onclick="openModal('costs')">
+                        <h3>Ausstehende Zahlungen</h3>
+                        <div class="pending-widget-summary">
+                            <span id="pending-count-preview">{{ data.pending_payments.pending_count }}</span>
+                            <small>offen</small>
+                            <strong><span id="pending-total-preview">{{ "%.2f"|format(data.pending_payments.total_amount_pending) }}</span> €</strong>
+                        </div>
+                    </div>
+                    <div class="card pricing-card clickable" onclick="openModal('pricing')">
+                        <h3>Kostenmodell</h3>
+                        <div class="pricing-preview">
+                            <p class="preview-text">Parkzeitpreise anzeigen →</p>
+                        </div>
                     </div>
                 </div>
-                <div class="card recent-vehicles-card clickable" onclick="openModal('dauerparker')">
-                    <h3>Dauerparker</h3>
-                </div>
-            </div>
-
-            <!-- Kostenmodell Widget -->
-            <div class="card pricing-card clickable" onclick="openModal('pricing')">
-                <h3>Kostenmodell</h3>
-                <div class="pricing-preview">
-                    <p class="preview-text">Parkzeitpreise anzeigen →</p>
+                <div class="widget-stack">
+                    <div class="card recent-vehicles-card clickable" onclick="openModal('dauerparker')">
+                        <h3>Dauerparker</h3>
+                    </div>
+                    <div class="card mqtt-monitor-card clickable" onclick="openModal('mqtt-monitor')">
+                        <h3>MQTT-Monitor</h3>
+                        <div class="mqtt-monitor-preview">
+                            <span id="mqtt-monitor-count-preview">0</span>
+                            <small>Nachrichten</small>
+                        </div>
+                        <p class="mqtt-esp-status">
+                            ESP Status: <span id="mqtt-esp-status-text">Verbindung herstellen...</span>
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -268,6 +280,35 @@
                 <div class="modal-summary">
                     <strong>Gesamt Dauerparker:</strong> <span id="dauerparker-count">0</span>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: MQTT-Monitor -->
+<div id="modal-mqtt-monitor" class="modal">
+    <div class="modal-content modal-mqtt-monitor">
+        <div class="modal-header">
+            <h2>MQTT-Monitor</h2>
+            <button class="modal-close" onclick="closeModal('mqtt-monitor')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="protocol-table-container">
+                <table class="protocol-table mqtt-monitor-table">
+                    <thead>
+                        <tr>
+                            <th>Zeitstempel</th>
+                            <th>Richtung</th>
+                            <th>Topic</th>
+                            <th>Inhalt</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mqtt-monitor-list">
+                        <tr>
+                            <td colspan="4" class="loading">Laden...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>

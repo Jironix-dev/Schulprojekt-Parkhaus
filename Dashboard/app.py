@@ -10,6 +10,7 @@ sys.path.insert(0, str(dashboard_dir))
 
 from routes import router
 from livefeed import live_feed
+from mqtt_parking_control import start_mqtt_heartbeat, stop_mqtt_heartbeat
 
 app = FastAPI()
 
@@ -18,10 +19,18 @@ app.mount("/static", StaticFiles(directory=str(dashboard_dir / "static")), name=
 
 app.include_router(router)
 
+
+@app.on_event("startup")
+async def startup_mqtt_heartbeat():
+    """Startet den MQTT-Heartbeat zum ESP32."""
+    start_mqtt_heartbeat()
+
+
 # Shutdown-Handler für Kamera
 @app.on_event("shutdown")
 async def shutdown_camera():
     """Beendet die Kamera beim Fahren des Dashboard herunter"""
+    stop_mqtt_heartbeat()
     live_feed.shutdown()
 
 if __name__ == "__main__":

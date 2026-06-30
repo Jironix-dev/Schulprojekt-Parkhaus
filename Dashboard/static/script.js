@@ -1,4 +1,7 @@
 // Aktualisiere die aktuelle Zeit
+let mqttEspConnected = false;
+let mqttWaitingDotCount = 3;
+
 function updateTime() {
     const now = new Date();
 
@@ -92,6 +95,9 @@ async function loadModalData(modalType) {
             break;
         case 'pricing':
             // Kostenmodell ist statisch, keine Daten laden nötig
+            return;
+        case 'mqtt-monitor':
+            loadMqttMonitor();
             return;
         case 'protocol':
             // Protokoll laden
@@ -324,6 +330,11 @@ function update() {
             loadModalData('costs');
         }
         updateProtocolPreview();
+        updateMqttMonitorPreview();
+        const mqttMonitorModal = document.getElementById('modal-mqtt-monitor');
+        if (mqttMonitorModal && mqttMonitorModal.classList.contains('active')) {
+            loadMqttMonitor();
+        }
 
         // Aktive Session aktualisieren
         if (data.active_session) {
@@ -340,6 +351,116 @@ function update() {
         document.getElementById("last-update").innerText = new Date().toLocaleString('de-DE');
     })
     .catch(err => console.error("Fehler beim Laden des Status:", err));
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+async function updateMqttMonitorPreview() {
+    const countElement = document.getElementById('mqtt-monitor-count-preview');
+    const espStatusElement = document.getElementById('mqtt-esp-status-text');
+    if (!countElement && !espStatusElement) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/widget/mqtt-monitor?limit=100');
+        const data = await response.json();
+        if (countElement) {
+            countElement.textContent = data.count ?? 0;
+        }
+        setMqttEspStatus(data.esp_status);
+    } catch (error) {
+        console.error('Fehler beim Laden der MQTT-Monitor-Vorschau:', error);
+        setMqttEspStatus({ connected: false });
+    }
+}
+
+function setMqttEspStatus(status) {
+    mqttEspConnected = Boolean(status && status.connected);
+    updateMqttEspStatusText();
+}
+
+function updateMqttEspStatusText() {
+    const statusElement = document.getElementById('mqtt-esp-status-text');
+    if (!statusElement) {
+        return;
+    }
+
+    if (mqttEspConnected) {
+        statusElement.textContent = 'Verbunden';
+        return;
+    }
+
+    const dots = '.'.repeat(mqttWaitingDotCount);
+    statusElement.textContent = `Verbindung herstellen${dots}`;
+}
+
+function animateMqttWaitingStatus() {
+    if (!mqttEspConnected) {
+        mqttWaitingDotCount = mqttWaitingDotCount >= 3 ? 1 : mqttWaitingDotCount + 1;
+        updateMqttEspStatusText();
+    }
+}
+
+async function loadMqttMonitor() {
+    const tbody = document.getElementById('mqtt-monitor-list');
+    if (!tbody) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/widget/mqtt-monitor?limit=100');
+        const data = await response.json();
+        const messages = data.messages || [];
+
+        const countElement = document.getElementById('mqtt-monitor-count-preview');
+        if (countElement) {
+            countElement.textContent = data.count ?? messages.length;
+        }
+        setMqttEspStatus(data.esp_status);
+
+        if (messages.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="loading">Noch keine MQTT-Nachrichten vorhanden</td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = messages.map(message => {
+            const direction = message.direction || '-';
+            const directionClass = direction.startsWith('Dashboard')
+                ? 'mqtt-direction-out'
+                : 'mqtt-direction-in';
+
+            return `
+                <tr>
+                    <td class="protocol-datetime">
+                        <span>${escapeHtml(message.timestamp || '-')}</span>
+                    </td>
+                    <td><span class="${directionClass}">${escapeHtml(direction)}</span></td>
+                    <td class="mqtt-monitor-topic">${escapeHtml(message.topic || '-')}</td>
+                    <td class="mqtt-monitor-payload">${escapeHtml(message.payload || '-')}</td>
+                </tr>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Fehler beim Laden des MQTT-Monitors:', error);
+        setMqttEspStatus({ connected: false });
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4" class="error">Fehler beim Laden</td>
+            </tr>
+        `;
+    }
 }
 
 async function updateProtocolPreview() {
@@ -583,6 +704,8 @@ window.addEventListener('DOMContentLoaded', function() {
     initializeLiveFeed();
     updateTime();
     setInterval(updateTime, 1000);
+    setInterval(animateMqttWaitingStatus, 600);
+    setInterval(updateMqttMonitorPreview, 1000);
     update();
     setInterval(update, 5000);
 });

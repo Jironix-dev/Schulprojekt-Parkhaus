@@ -15,10 +15,10 @@ Passend zu Dashboard/mqtt_parking_control.py werden diese Nachrichten erwartet:
 - "Schranke Zu"
 
 Hardware:
-- 1 Pin fuer rote Ampel-LED
-- 1 Pin fuer gelbe Ampel-LED
-- 1 Pin fuer gruene Ampel-LED
-- 1 Pin fuer Servo-Signal der Schranke
+- 3 Pins fuer die Einfahrts-Ampel
+- 3 Pins fuer die Ausfahrts-Ampel
+- 1 Pin fuer Servo-Signal der Einfahrts-Schranke
+- 1 Pin fuer Servo-Signal der Ausfahrts-Schranke
 
 Hinweis:
 Diese Datei ist fuer MicroPython gedacht. Du kannst sie z.B. mit Thonny,
@@ -64,9 +64,18 @@ MQTT_BROKER_IP = "192.168.4.1"
 
 MQTT_BROKER_PORT = 1883
 
-# Dieses Topic muss exakt zum Dashboard passen:
-# Dashboard/mqtt_parking_control.py -> MQTT_COMMAND_TOPIC = "parkhaus/steuerung"
-MQTT_COMMAND_TOPIC = b"parkhaus/steuerung"
+# Diese Topics muessen exakt zum Dashboard passen.
+MQTT_TOPIC_AMPEL_EINFAHRT = b"ampel/einfahrt"
+MQTT_TOPIC_AMPEL_AUSFAHRT = b"ampel/ausfahrt"
+MQTT_TOPIC_SCHRANKE_EINFAHRT = b"schranke/einfahrt"
+MQTT_TOPIC_SCHRANKE_AUSFAHRT = b"schranke/ausfahrt"
+
+MQTT_TOPIC_STATUS_AMPEL_EINFAHRT = b"ampel/einfahrt/status"
+MQTT_TOPIC_STATUS_AMPEL_AUSFAHRT = b"ampel/ausfahrt/status"
+MQTT_TOPIC_STATUS_SCHRANKE = b"schranke/status"
+
+MQTT_TOPIC_HEARTBEAT_PING = b"esp32/heartbeat/ping"
+MQTT_TOPIC_HEARTBEAT_PONG = b"esp32/heartbeat/pong"
 
 # Frei waehlbarer Name fuer den ESP32 im MQTT-Broker.
 MQTT_CLIENT_ID = b"esp32_parkhaus_schranke"
@@ -81,13 +90,19 @@ MQTT_PASSWORD = None
 # PINBELEGUNG - HIER KANNST DU DEINE PINS AENDERN
 # =============================================================================
 
-# LED-Pins fuer die Ampel.
-PIN_AMPEL_ROT = 25
-PIN_AMPEL_GELB = 26
-PIN_AMPEL_GRUEN = 27
+# LED-Pins fuer die Einfahrts-Ampel.
+PIN_AMPEL_EINFAHRT_ROT = 2
+PIN_AMPEL_EINFAHRT_GELB = 3
+PIN_AMPEL_EINFAHRT_GRUEN = 4
 
-# Servo-Signalpin fuer die Schranke.
-PIN_SERVO_SCHRANKE = 14
+# LED-Pins fuer die Ausfahrts-Ampel.
+PIN_AMPEL_AUSFAHRT_ROT = 12
+PIN_AMPEL_AUSFAHRT_GELB = 13
+PIN_AMPEL_AUSFAHRT_GRUEN = 14
+
+# Servo-Signalpins fuer die Schranken.
+PIN_SERVO_SCHRANKE_EINFAHRT = 5
+PIN_SERVO_SCHRANKE_AUSFAHRT = 15
 
 
 # =============================================================================
@@ -117,20 +132,81 @@ NACHRICHT_AMPEL_GELB = b"Ampel Gelb"
 NACHRICHT_AMPEL_GRUEN = b"Ampel Gruen"
 NACHRICHT_SCHRANKE_AUF = b"Schranke Auf"
 NACHRICHT_SCHRANKE_ZU = b"Schranke Zu"
+NACHRICHT_HEARTBEAT_PING = b"ping"
 
 
 # =============================================================================
 # HARDWARE INITIALISIEREN
 # =============================================================================
 
-ampel_rot = machine.Pin(PIN_AMPEL_ROT, machine.Pin.OUT)
-ampel_gelb = machine.Pin(PIN_AMPEL_GELB, machine.Pin.OUT)
-ampel_gruen = machine.Pin(PIN_AMPEL_GRUEN, machine.Pin.OUT)
+ampel_einfahrt_rot = machine.Pin(PIN_AMPEL_EINFAHRT_ROT, machine.Pin.OUT)
+ampel_einfahrt_gelb = machine.Pin(PIN_AMPEL_EINFAHRT_GELB, machine.Pin.OUT)
+ampel_einfahrt_gruen = machine.Pin(PIN_AMPEL_EINFAHRT_GRUEN, machine.Pin.OUT)
 
-servo = machine.PWM(machine.Pin(PIN_SERVO_SCHRANKE), freq=SERVO_PWM_FREQUENZ)
+ampel_ausfahrt_rot = machine.Pin(PIN_AMPEL_AUSFAHRT_ROT, machine.Pin.OUT)
+ampel_ausfahrt_gelb = machine.Pin(PIN_AMPEL_AUSFAHRT_GELB, machine.Pin.OUT)
+ampel_ausfahrt_gruen = machine.Pin(PIN_AMPEL_AUSFAHRT_GRUEN, machine.Pin.OUT)
+
+servo_einfahrt = machine.PWM(
+    machine.Pin(PIN_SERVO_SCHRANKE_EINFAHRT),
+    freq=SERVO_PWM_FREQUENZ,
+)
+servo_ausfahrt = machine.PWM(
+    machine.Pin(PIN_SERVO_SCHRANKE_AUSFAHRT),
+    freq=SERVO_PWM_FREQUENZ,
+)
+
+mqtt_client = None
 
 
-def servo_winkel_setzen(winkel):
+def zeitstempel_erstellen():
+    """Erstellt einen einfachen Datums- und Uhrzeitstempel aus der ESP32-Uhr."""
+    jetzt = time.localtime()
+    return "%04d-%02d-%02d %02d:%02d:%02d" % (
+        jetzt[0],
+        jetzt[1],
+        jetzt[2],
+        jetzt[3],
+        jetzt[4],
+        jetzt[5],
+    )
+
+
+def status_senden(topic, bereich, zustand, befehl):
+    """Sendet eine Rueckmeldung an den MQTT-Broker."""
+    if mqtt_client is None:
+        return
+
+    nachricht = (
+        "zeit=%s; bereich=%s; status=%s; befehl=%s"
+        % (zeitstempel_erstellen(), bereich, zustand, befehl)
+    )
+
+    try:
+        mqtt_client.publish(topic, nachricht)
+        print("MQTT Status gesendet:", topic, nachricht)
+    except Exception as fehler:
+        print("MQTT Status konnte nicht gesendet werden:", fehler)
+
+
+def heartbeat_antwort_senden(befehl):
+    """Antwortet auf einen Heartbeat-Ping vom Dashboard."""
+    if mqtt_client is None:
+        return
+
+    nachricht = "zeit=%s; status=online; befehl=%s" % (
+        zeitstempel_erstellen(),
+        befehl,
+    )
+
+    try:
+        mqtt_client.publish(MQTT_TOPIC_HEARTBEAT_PONG, nachricht)
+        print("Heartbeat Antwort gesendet:", nachricht)
+    except Exception as fehler:
+        print("Heartbeat Antwort konnte nicht gesendet werden:", fehler)
+
+
+def servo_winkel_setzen(servo_objekt, winkel):
     """
     Stellt den Servo auf einen Winkel zwischen 0 und 180 Grad.
 
@@ -150,57 +226,130 @@ def servo_winkel_setzen(winkel):
     # MicroPython auf ESP32 nutzt duty_u16 mit 0..65535.
     periode_us = 1000000 // SERVO_PWM_FREQUENZ
     duty = int(puls_us * 65535 // periode_us)
-    servo.duty_u16(duty)
+    servo_objekt.duty_u16(duty)
 
 
-def ampel_aus():
+def ampel_aus(rot_pin, gelb_pin, gruen_pin):
     """Schaltet alle Ampel-LEDs aus."""
-    ampel_rot.off()
-    ampel_gelb.off()
-    ampel_gruen.off()
+    rot_pin.off()
+    gelb_pin.off()
+    gruen_pin.off()
 
 
-def ampel_rot_schalten():
+def ampel_rot_schalten(name, status_topic, rot_pin, gelb_pin, gruen_pin, befehl):
     """Schaltet die Ampel auf Rot."""
-    ampel_aus()
-    ampel_rot.on()
-    print("Ampel ist jetzt ROT")
+    ampel_aus(rot_pin, gelb_pin, gruen_pin)
+    rot_pin.on()
+    print("Ampel", name, "ist jetzt ROT")
+    status_senden(status_topic, "ampel/" + name, "Rot", befehl)
 
 
-def ampel_gelb_schalten():
+def ampel_gelb_schalten(name, status_topic, rot_pin, gelb_pin, gruen_pin, befehl):
     """Schaltet die Ampel auf Gelb."""
-    ampel_aus()
-    ampel_gelb.on()
-    print("Ampel ist jetzt GELB")
+    ampel_aus(rot_pin, gelb_pin, gruen_pin)
+    gelb_pin.on()
+    print("Ampel", name, "ist jetzt GELB")
+    status_senden(status_topic, "ampel/" + name, "Gelb", befehl)
 
 
-def ampel_gruen_schalten():
+def ampel_gruen_schalten(name, status_topic, rot_pin, gelb_pin, gruen_pin, befehl):
     """Schaltet die Ampel auf Gruen."""
-    ampel_aus()
-    ampel_gruen.on()
-    print("Ampel ist jetzt GRUEN")
+    ampel_aus(rot_pin, gelb_pin, gruen_pin)
+    gruen_pin.on()
+    print("Ampel", name, "ist jetzt GRUEN")
+    status_senden(status_topic, "ampel/" + name, "Gruen", befehl)
 
 
-def schranke_oeffnen():
+def schranke_oeffnen(name, servo_objekt, befehl):
     """Oeffnet die Schranke."""
-    servo_winkel_setzen(SERVO_WINKEL_AUF)
-    print("Schranke ist jetzt OFFEN")
+    servo_winkel_setzen(servo_objekt, SERVO_WINKEL_AUF)
+    print("Schranke", name, "ist jetzt OFFEN")
+    status_senden(MQTT_TOPIC_STATUS_SCHRANKE, "schranke/" + name, "Offen", befehl)
 
 
-def schranke_schliessen():
+def schranke_schliessen(name, servo_objekt, befehl):
     """Schliesst die Schranke."""
-    servo_winkel_setzen(SERVO_WINKEL_ZU)
-    print("Schranke ist jetzt ZU")
+    servo_winkel_setzen(servo_objekt, SERVO_WINKEL_ZU)
+    print("Schranke", name, "ist jetzt ZU")
+    status_senden(MQTT_TOPIC_STATUS_SCHRANKE, "schranke/" + name, "Zu", befehl)
+
+
+def ampel_einfahrt_rot_schalten(befehl="Startzustand"):
+    ampel_rot_schalten(
+        "einfahrt",
+        MQTT_TOPIC_STATUS_AMPEL_EINFAHRT,
+        ampel_einfahrt_rot,
+        ampel_einfahrt_gelb,
+        ampel_einfahrt_gruen,
+        befehl,
+    )
+
+
+def ampel_einfahrt_gelb_schalten(befehl):
+    ampel_gelb_schalten(
+        "einfahrt",
+        MQTT_TOPIC_STATUS_AMPEL_EINFAHRT,
+        ampel_einfahrt_rot,
+        ampel_einfahrt_gelb,
+        ampel_einfahrt_gruen,
+        befehl,
+    )
+
+
+def ampel_einfahrt_gruen_schalten(befehl):
+    ampel_gruen_schalten(
+        "einfahrt",
+        MQTT_TOPIC_STATUS_AMPEL_EINFAHRT,
+        ampel_einfahrt_rot,
+        ampel_einfahrt_gelb,
+        ampel_einfahrt_gruen,
+        befehl,
+    )
+
+
+def ampel_ausfahrt_rot_schalten(befehl="Startzustand"):
+    ampel_rot_schalten(
+        "ausfahrt",
+        MQTT_TOPIC_STATUS_AMPEL_AUSFAHRT,
+        ampel_ausfahrt_rot,
+        ampel_ausfahrt_gelb,
+        ampel_ausfahrt_gruen,
+        befehl,
+    )
+
+
+def ampel_ausfahrt_gelb_schalten(befehl):
+    ampel_gelb_schalten(
+        "ausfahrt",
+        MQTT_TOPIC_STATUS_AMPEL_AUSFAHRT,
+        ampel_ausfahrt_rot,
+        ampel_ausfahrt_gelb,
+        ampel_ausfahrt_gruen,
+        befehl,
+    )
+
+
+def ampel_ausfahrt_gruen_schalten(befehl):
+    ampel_gruen_schalten(
+        "ausfahrt",
+        MQTT_TOPIC_STATUS_AMPEL_AUSFAHRT,
+        ampel_ausfahrt_rot,
+        ampel_ausfahrt_gelb,
+        ampel_ausfahrt_gruen,
+        befehl,
+    )
 
 
 def grundzustand_setzen():
     """
     Setzt den Startzustand:
-    - Ampel rot
-    - Schranke geschlossen
+    - beide Ampeln rot
+    - beide Schranken geschlossen
     """
-    ampel_rot_schalten()
-    schranke_schliessen()
+    ampel_einfahrt_rot_schalten()
+    ampel_ausfahrt_rot_schalten()
+    schranke_schliessen("einfahrt", servo_einfahrt, "Startzustand")
+    schranke_schliessen("ausfahrt", servo_ausfahrt, "Startzustand")
 
 
 def verbindung_erfolgreich_anzeigen():
@@ -210,19 +359,24 @@ def verbindung_erfolgreich_anzeigen():
     Ablauf:
     Rot -> Gelb -> Gruen -> Gelb -> Rot
     """
-    ampel_rot_schalten()
+    ampel_einfahrt_rot_schalten("Verbindungstest")
+    ampel_ausfahrt_rot_schalten("Verbindungstest")
     time.sleep(LED_TEST_DAUER_SEKUNDEN)
 
-    ampel_gelb_schalten()
+    ampel_einfahrt_gelb_schalten("Verbindungstest")
+    ampel_ausfahrt_gelb_schalten("Verbindungstest")
     time.sleep(LED_TEST_DAUER_SEKUNDEN)
 
-    ampel_gruen_schalten()
+    ampel_einfahrt_gruen_schalten("Verbindungstest")
+    ampel_ausfahrt_gruen_schalten("Verbindungstest")
     time.sleep(LED_TEST_DAUER_SEKUNDEN)
 
-    ampel_gelb_schalten()
+    ampel_einfahrt_gelb_schalten("Verbindungstest")
+    ampel_ausfahrt_gelb_schalten("Verbindungstest")
     time.sleep(LED_TEST_DAUER_SEKUNDEN)
 
-    ampel_rot_schalten()
+    ampel_einfahrt_rot_schalten("Verbindungstest")
+    ampel_ausfahrt_rot_schalten("Verbindungstest")
 
 
 # =============================================================================
@@ -288,27 +442,55 @@ def mqtt_nachricht_empfangen(topic, msg):
     """
     print("MQTT empfangen:", topic, msg)
 
-    if msg == NACHRICHT_AMPEL_ROT:
-        ampel_rot_schalten()
+    befehl = msg.decode() if isinstance(msg, bytes) else str(msg)
 
-    elif msg == NACHRICHT_AMPEL_GELB:
-        ampel_gelb_schalten()
+    if topic == MQTT_TOPIC_AMPEL_EINFAHRT:
+        if msg == NACHRICHT_AMPEL_ROT:
+            ampel_einfahrt_rot_schalten(befehl)
+        elif msg == NACHRICHT_AMPEL_GELB:
+            ampel_einfahrt_gelb_schalten(befehl)
+        elif msg == NACHRICHT_AMPEL_GRUEN:
+            ampel_einfahrt_gruen_schalten(befehl)
+        else:
+            print("Unbekannter Ampel-Befehl Einfahrt:", msg)
 
-    elif msg == NACHRICHT_AMPEL_GRUEN:
-        ampel_gruen_schalten()
+    elif topic == MQTT_TOPIC_AMPEL_AUSFAHRT:
+        if msg == NACHRICHT_AMPEL_ROT:
+            ampel_ausfahrt_rot_schalten(befehl)
+        elif msg == NACHRICHT_AMPEL_GELB:
+            ampel_ausfahrt_gelb_schalten(befehl)
+        elif msg == NACHRICHT_AMPEL_GRUEN:
+            ampel_ausfahrt_gruen_schalten(befehl)
+        else:
+            print("Unbekannter Ampel-Befehl Ausfahrt:", msg)
 
-    elif msg == NACHRICHT_SCHRANKE_AUF:
-        schranke_oeffnen()
+    elif topic == MQTT_TOPIC_SCHRANKE_EINFAHRT:
+        if msg == NACHRICHT_SCHRANKE_AUF:
+            schranke_oeffnen("einfahrt", servo_einfahrt, befehl)
+        elif msg == NACHRICHT_SCHRANKE_ZU:
+            schranke_schliessen("einfahrt", servo_einfahrt, befehl)
+        else:
+            print("Unbekannter Schranken-Befehl Einfahrt:", msg)
 
-    elif msg == NACHRICHT_SCHRANKE_ZU:
-        schranke_schliessen()
+    elif topic == MQTT_TOPIC_SCHRANKE_AUSFAHRT:
+        if msg == NACHRICHT_SCHRANKE_AUF:
+            schranke_oeffnen("ausfahrt", servo_ausfahrt, befehl)
+        elif msg == NACHRICHT_SCHRANKE_ZU:
+            schranke_schliessen("ausfahrt", servo_ausfahrt, befehl)
+        else:
+            print("Unbekannter Schranken-Befehl Ausfahrt:", msg)
+
+    elif topic == MQTT_TOPIC_HEARTBEAT_PING:
+        heartbeat_antwort_senden(befehl)
 
     else:
-        print("Unbekannter MQTT-Befehl:", msg)
+        print("Unbekanntes MQTT-Topic:", topic)
 
 
 def mqtt_verbinden():
     """Verbindet den ESP32 mit dem MQTT-Broker und abonniert das Steuer-Topic."""
+    global mqtt_client
+
     if MQTT_USERNAME and MQTT_PASSWORD:
         client = MQTTClient(
             MQTT_CLIENT_ID,
@@ -326,11 +508,21 @@ def mqtt_verbinden():
 
     client.set_callback(mqtt_nachricht_empfangen)
     client.connect()
-    client.subscribe(MQTT_COMMAND_TOPIC)
+    client.subscribe(MQTT_TOPIC_AMPEL_EINFAHRT)
+    client.subscribe(MQTT_TOPIC_AMPEL_AUSFAHRT)
+    client.subscribe(MQTT_TOPIC_SCHRANKE_EINFAHRT)
+    client.subscribe(MQTT_TOPIC_SCHRANKE_AUSFAHRT)
+    client.subscribe(MQTT_TOPIC_HEARTBEAT_PING)
+    mqtt_client = client
 
     print("MQTT verbunden")
     print("Broker:", MQTT_BROKER_IP)
-    print("Topic:", MQTT_COMMAND_TOPIC)
+    print("Topics:")
+    print("-", MQTT_TOPIC_AMPEL_EINFAHRT)
+    print("-", MQTT_TOPIC_AMPEL_AUSFAHRT)
+    print("-", MQTT_TOPIC_SCHRANKE_EINFAHRT)
+    print("-", MQTT_TOPIC_SCHRANKE_AUSFAHRT)
+    print("-", MQTT_TOPIC_HEARTBEAT_PING)
 
     return client
 
@@ -343,6 +535,8 @@ def hauptprogramm():
     - dauerhaft auf MQTT-Befehle warten
     - bei Verbindungsfehler automatisch neu verbinden
     """
+    global mqtt_client
+
     grundzustand_setzen()
     wlan_verbinden()
 
@@ -368,6 +562,7 @@ def hauptprogramm():
                 pass
 
             client = None
+            mqtt_client = None
             time.sleep(5)
 
 
