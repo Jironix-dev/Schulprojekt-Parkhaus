@@ -12,10 +12,18 @@ from io import BytesIO
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.database.db import db
+from backend.database.validators import PlateValidator
 from backend.services.dashboard_service import DashboardService
 from backend.services.exit_service import ExitService
 from backend.services.plate_recognition_service import PlateRecognitionService
-from livefeed import generate_stream, get_static_frame, live_feed
+from livefeed import (
+    generate_stream,
+    get_auto_detection_state,
+    get_latest_detection_result,
+    get_static_frame,
+    live_feed,
+    register_auto_detection_callback,
+)
 
 try:
     from .mqtt_parking_control import (
@@ -88,9 +96,10 @@ def get_entry_request_info(request_id: int) -> dict | None:
 
 def get_latest_entry_request_for_plate(license_plate: str) -> dict | None:
     """Findet die neueste Entry Request fuer ein erkanntes Kennzeichen."""
+    _, license_plate = PlateValidator.validate_and_normalize(license_plate)
     cursor = db.get_cursor()
     cursor.execute("""
-        SELECT id, approval_status, is_dauerparker
+        SELECT id, license_plate, approval_status, is_dauerparker, notes
         FROM entry_requests
         WHERE license_plate = ?
         ORDER BY id DESC
@@ -103,20 +112,46 @@ def get_latest_entry_request_for_plate(license_plate: str) -> dict | None:
 
     return {
         "id": row[0],
-        "approval_status": row[1],
-        "is_dauerparker": bool(row[2]),
+        "license_plate": row[1],
+        "approval_status": row[2],
+        "is_dauerparker": bool(row[3]),
+        "message": row[4] or ("Dauerparker" if row[3] else "")
     }
 
 
-def start_mqtt_for_auto_approved_dauerparker(license_plate: str) -> None:
-    """Oeffnet Ampel/Schranke nur bei automatisch genehmigten Dauerparkern."""
+def build_entry_request_status(license_plate: str) -> dict | None:
+    """Bereitet Protokollstatus fuer die Auto-Erkennungsanzeige auf."""
+    entry_request = get_latest_entry_request_for_plate(license_plate)
+    if not entry_request:
+        return None
+
+    approval_status = entry_request["approval_status"]
+    if approval_status == "pending":
+        display_message = "Muss genehmigt werden"
+    elif entry_request["is_dauerparker"]:
+        display_message = "Dauerparker"
+    elif approval_status == "approved":
+        display_message = entry_request["message"] or "Kennzeichen bekannt"
+    elif approval_status == "rejected":
+        display_message = "Einfahrt abgelehnt"
+    else:
+        display_message = entry_request["message"] or approval_status
+
+    return {
+        "request_id": entry_request["id"],
+        "license_plate": entry_request["license_plate"],
+        "approval_status": approval_status,
+        "is_dauerparker": entry_request["is_dauerparker"],
+        "message": display_message,
+        "can_decide": approval_status == "pending",
+    }
+
+
+def start_mqtt_for_auto_approved_entry(license_plate: str) -> None:
+    """Oeffnet Ampel/Schranke bei automatisch genehmigten Einfahrten."""
     entry_request = get_latest_entry_request_for_plate(license_plate)
 
-    if (
-        entry_request
-        and entry_request["approval_status"] == "approved"
-        and entry_request["is_dauerparker"]
-    ):
+    if entry_request and entry_request["approval_status"] == "approved":
         start_mqtt_gate_sequence(license_plate)
 
 
@@ -143,7 +178,7 @@ def handle_recognized_plate(license_plate: str, ocr_confidence: float) -> dict:
             "time": time.strftime("%H:%M:%S"),
             "event": f"Entry Request: {license_plate} {message}"
         })
-        start_mqtt_for_auto_approved_dauerparker(license_plate)
+        start_mqtt_for_auto_approved_entry(license_plate)
     else:
         logs.append({
             "time": time.strftime("%H:%M:%S"),
@@ -153,8 +188,22 @@ def handle_recognized_plate(license_plate: str, ocr_confidence: float) -> dict:
     return {
         "flow": "entry",
         "success": success,
-        "message": message
+        "message": message,
+        "entry_request": build_entry_request_status(license_plate)
     }
+
+
+def handle_auto_detected_plate(result: dict) -> None:
+    """Nutzt den bestehenden Einfahrt/Ausfahrt-Ablauf fuer Live-Autoerkennung."""
+    license_plate = (result.get("detected_plate") or "").strip()
+    if not license_plate:
+        return
+
+    ocr_confidence = result.get("ocr_confidence", 0.0)
+    result["parking_flow"] = handle_recognized_plate(license_plate, ocr_confidence)
+
+
+register_auto_detection_callback(handle_auto_detected_plate)
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
@@ -283,18 +332,17 @@ def get_durations_widget():
 
 @router.get("/api/widget/plate-recognition")
 def get_plate_recognition_widget():
-    """Widget: Kennzeichen-Erkennungs-Details"""
+    """Widget: Bilder der letzten automatischen Kennzeichen-Erkennung."""
     try:
-        plates = DashboardService.get_plate_recognition_details()
-        avg_confidence = sum(v['confidence_score'] for v in plates) / len(plates) if plates else 0
+        latest_detection = get_latest_detection_result()
         return {
             "title": "Kennzeichen-Erkennung",
-            "vehicles": plates,
-            "average_confidence": round(avg_confidence, 1),
-            "count": len(plates)
+            "latest_detection": latest_detection,
+            "average_confidence": round(latest_detection.get("combined_confidence", 0.0) * 100, 1),
+            "count": 1 if latest_detection else 0
         }
     except Exception as e:
-        return {"error": str(e), "vehicles": []}
+        return {"error": str(e), "latest_detection": {}, "count": 0}
 
 
 @router.get("/api/widget/status")
@@ -599,6 +647,20 @@ def get_recognition_status():
         }
 
 
+@router.get("/api/recognition/auto-status")
+def get_auto_recognition_status():
+    """Gibt den letzten Status der automatischen Live-Erkennung zurück."""
+    state = get_auto_detection_state()
+    license_plate = (state.get("detected_plate") or "").strip()
+    if license_plate:
+        entry_request = build_entry_request_status(license_plate)
+        if entry_request:
+            parking_flow = state.get("parking_flow") or {"flow": "entry"}
+            parking_flow["entry_request"] = entry_request
+            state["parking_flow"] = parking_flow
+    return state
+
+
 @router.post("/api/recognition/reset-statistics")
 def reset_recognition_statistics():
     """Setzt Erkennungs-Statistiken zurück"""
@@ -638,7 +700,7 @@ def save_entry_request(data: dict = Body(...)):
             "event": f"Entry Request: {license_plate} - {message}"
         })
         if success:
-            start_mqtt_for_auto_approved_dauerparker(license_plate)
+            start_mqtt_for_auto_approved_entry(license_plate)
         
         return {
             "status": "success" if success else "error",

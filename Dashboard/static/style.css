@@ -1317,6 +1317,78 @@ h3 {
     flex-wrap: wrap;
 }
 
+.auto-recognition-status {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    color: #fff;
+    font-weight: 700;
+    text-align: center;
+}
+
+.auto-status-main {
+    font-size: 1rem;
+}
+
+.auto-status-note {
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 0.9rem;
+}
+
+.auto-status-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.auto-status-actions button {
+    flex: 1;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.auto-recognition-status.is-searching {
+    color: #ffd93d;
+}
+
+.auto-recognition-status.is-valid {
+    color: #51cf66;
+}
+
+.auto-recognition-status.is-invalid {
+    color: #ffb4b4;
+}
+
+.auto-recognition-status.is-pending {
+    color: #ffd93d;
+}
+
+.auto-recognition-status.is-idle {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.btn-recognition-images {
+    width: 100%;
+    padding: 11px 14px;
+    border: none;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #1e3a8a;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 800;
+}
+
+.btn-recognition-images:hover {
+    background: #e0ecff;
+}
+
 .btn-recognize, .btn-upload {
     flex: 1;
     min-width: 120px;
@@ -1378,6 +1450,65 @@ h3 {
     width: 100%;
     border-radius: 8px;
     border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.recognition-latest-section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-bottom: 18px;
+    padding: 14px;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.05);
+    border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.recognition-latest-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.recognition-latest-header > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.recognition-image-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.recognition-image-button {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0;
+    border: 1px solid rgba(15, 23, 42, 0.14);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+    color: #1f2937;
+    cursor: pointer;
+    text-align: left;
+}
+
+.recognition-image-button img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    display: block;
+    background: #111827;
+}
+
+.recognition-image-button span {
+    padding: 0 10px 10px;
+    font-size: 0.85rem;
+    font-weight: 700;
 }
 
 .recognition-stats {
@@ -1489,6 +1620,10 @@ h3 {
     }
     
     .recognition-info-box {
+        grid-template-columns: 1fr;
+    }
+
+    .recognition-image-grid {
         grid-template-columns: 1fr;
     }
 }

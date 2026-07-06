@@ -573,36 +573,58 @@ class DashboardService:
             if active_session:
                 return False, "Auto ist bereits im Parkhaus"
             
-            # Prüfe ob es ein Dauerparker ist
-            cursor.execute("SELECT id FROM vehicles WHERE license_plate = ? AND status = 'dauerparker'", (license_plate,))
-            is_dauerparker = cursor.fetchone() is not None
-            
-            # Bestimme Approval Status: Dauerparker werden automatisch genehmigt
-            approval_status = 'approved' if is_dauerparker else 'pending'
-            approved_at = DashboardService._now_db() if is_dauerparker else None
+            # Dauerparker und bereits einmal genehmigte Fahrzeuge duerfen automatisch einfahren.
+            cursor.execute("""
+                SELECT status
+                FROM vehicles
+                WHERE license_plate = ?
+            """, (license_plate,))
+            vehicle = cursor.fetchone()
+
+            vehicle_status = vehicle[0] if vehicle else None
+            is_dauerparker = vehicle_status == 'dauerparker'
+            is_known_approved = vehicle_status == 'approved'
+            auto_approved = is_dauerparker or is_known_approved
+
+            approval_status = 'approved' if auto_approved else 'pending'
+            approved_at = DashboardService._now_db() if auto_approved else None
+            request_note = "Kennzeichen bekannt" if is_known_approved and not is_dauerparker else None
             started_session = False
             session_message = ""
 
-            if is_dauerparker:
+            if auto_approved:
                 started_session, session_message = DashboardService._start_parking_session_for_plate(
                     license_plate,
-                    is_dauerparker=True
+                    is_dauerparker=is_dauerparker
                 )
             
             # Speichere Entry Request
             cursor.execute("""
-                INSERT INTO entry_requests (license_plate, ocr_confidence, approval_status, is_dauerparker, approved_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO entry_requests (
+                    license_plate,
+                    ocr_confidence,
+                    approval_status,
+                    is_dauerparker,
+                    approved_at,
+                    notes
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 license_plate,
                 ocr_confidence,
                 approval_status,
                 1 if is_dauerparker else 0,
-                approved_at
+                approved_at,
+                request_note
             ))
             db.commit()
             
-            status_msg = "(Auto-genehmigt: Dauerparker)" if is_dauerparker else "(Bestätigung erforderlich)"
+            if is_dauerparker:
+                status_msg = "(Auto-genehmigt: Dauerparker)"
+            elif is_known_approved:
+                status_msg = "(Auto-genehmigt: bekanntes Kennzeichen)"
+            else:
+                status_msg = "(Bestätigung erforderlich)"
             if started_session:
                 status_msg = f"{status_msg} - {session_message}"
             return True, f"Anfrage gespeichert {status_msg}"
@@ -629,7 +651,8 @@ class DashboardService:
                 datetime(detected_at, 'localtime') AS detected_at,
                 ocr_confidence,
                 approval_status,
-                is_dauerparker
+                is_dauerparker,
+                notes
             FROM entry_requests
             WHERE approval_status != 'pending'
                OR id IN (
@@ -638,7 +661,7 @@ class DashboardService:
                     WHERE approval_status = 'pending'
                     GROUP BY license_plate
                )
-            ORDER BY detected_at DESC
+            ORDER BY detected_at DESC, id DESC
             LIMIT ?
         """, (limit,))
         
@@ -650,7 +673,8 @@ class DashboardService:
                 'detected_at': row[2],
                 'ocr_confidence': round(row[3] * 100, 1) if row[3] else 0,
                 'approval_status': row[4],
-                'is_dauerparker': bool(row[5])
+                'is_dauerparker': bool(row[5]),
+                'message': row[6] or ('Dauerparker' if row[5] else '')
             }
             for row in results
         ]
@@ -662,6 +686,7 @@ class DashboardService:
         cursor.execute("""
             SELECT
                 protocol_type,
+                protocol_id,
                 license_plate,
                 action_time,
                 status,
@@ -669,10 +694,12 @@ class DashboardService:
             FROM (
                 SELECT
                     'entry' AS protocol_type,
+                    id AS protocol_id,
                     license_plate,
                     datetime(detected_at, 'localtime') AS action_time,
                     approval_status AS status,
                     CASE
+                        WHEN notes = 'Kennzeichen bekannt' THEN 'Kennzeichen bekannt'
                         WHEN approval_status = 'pending' THEN 'Wartet auf Bestaetigung'
                         WHEN approval_status = 'approved' THEN 'Einfahrt genehmigt'
                         WHEN approval_status = 'rejected' THEN 'Einfahrt abgelehnt'
@@ -682,13 +709,14 @@ class DashboardService:
                 UNION ALL
                 SELECT
                     'exit' AS protocol_type,
+                    id AS protocol_id,
                     license_plate,
                     detected_at AS action_time,
                     exit_status AS status,
                     message
                 FROM exit_requests
             )
-            ORDER BY action_time DESC
+            ORDER BY action_time DESC, protocol_id DESC
             LIMIT 1
         """)
         row = cursor.fetchone()
@@ -698,10 +726,10 @@ class DashboardService:
 
         return {
             'type': row[0],
-            'license_plate': row[1],
-            'detected_at': row[2],
-            'status': row[3],
-            'message': row[4],
+            'license_plate': row[2],
+            'detected_at': row[3],
+            'status': row[4],
+            'message': row[5],
         }
     
     @staticmethod

@@ -132,6 +132,11 @@ function displayModalData(modalType, data, listId) {
         return;
     }
 
+    if (modalType === 'plate-recognition') {
+        displayPlateRecognitionData(data, container);
+        return;
+    }
+
     if (!data.vehicles || data.vehicles.length === 0) {
         container.innerHTML = '<p class="loading">Keine Fahrzeuge im Parkhaus</p>';
         return;
@@ -177,25 +182,6 @@ function displayModalData(modalType, data, listId) {
             document.getElementById('avg-duration').innerText = data.average_duration_minutes.toFixed(1);
             break;
 
-        case 'plate-recognition':
-            data.vehicles.forEach(v => {
-                html += `
-                    <div class="data-item">
-                        <div class="data-item-main">
-                            <span class="data-item-plate">${v.license_plate}</span>
-                            <span class="data-item-secondary">Erkannt: ${v.detected_plate || 'N/A'}</span>
-                        </div>
-                        <div style="text-align: right;">
-                            <div class="data-item-value">${v.confidence_score}%</div>
-                            <span class="data-item-secondary">${v.detection_count} Erkennungen</span>
-                        </div>
-                    </div>
-                `;
-            });
-            container.innerHTML = html;
-            document.getElementById('avg-confidence').innerText = data.average_confidence.toFixed(1);
-            break;
-
         case 'status':
             data.vehicles.forEach(v => {
                 html += `
@@ -234,6 +220,61 @@ function displayModalData(modalType, data, listId) {
             break;
             break;
     }
+}
+
+function displayPlateRecognitionData(data, container) {
+    const avgConfidence = document.getElementById('avg-confidence');
+    if (avgConfidence) {
+        avgConfidence.innerText = Number((data.latest_detection || {}).combined_confidence * 100 || 0).toFixed(1);
+    }
+
+    const latest = data.latest_detection || {};
+    const hasLatestImages = latest.vehicle_snapshot || latest.annotated_frame || latest.plate_image;
+    let html = '';
+
+    if (hasLatestImages) {
+        const encodedLatest = encodeURIComponent(JSON.stringify(latest));
+        const plateLabel = latest.detected_plate || 'Unbekannt';
+        const combinedConfidence = ((latest.combined_confidence || 0) * 100).toFixed(1);
+
+        html += `
+            <div class="recognition-latest-section">
+                <div class="recognition-latest-header">
+                    <div>
+                        <span class="data-item-secondary">Letzte automatische Erkennung</span>
+                        <strong class="data-item-plate">${escapeHtml(plateLabel)}</strong>
+                    </div>
+                    <span class="data-item-value">${combinedConfidence}%</span>
+                </div>
+                <div class="recognition-image-grid">
+                    ${latest.vehicle_snapshot ? `
+                        <button class="recognition-image-button" onclick="showDetailModal('${encodedLatest}')">
+                            <img src="${latest.vehicle_snapshot}" alt="Fahrzeug ohne Bounding Box">
+                            <span>Fahrzeug</span>
+                        </button>
+                    ` : ''}
+                    ${latest.annotated_frame ? `
+                        <button class="recognition-image-button" onclick="showDetailModal('${encodedLatest}')">
+                            <img src="${latest.annotated_frame}" alt="Fahrzeug mit Bounding Box">
+                            <span>Mit Bounding Box</span>
+                        </button>
+                    ` : ''}
+                    ${latest.plate_image ? `
+                        <button class="recognition-image-button" onclick="showDetailModal('${encodedLatest}')">
+                            <img src="${latest.plate_image}" alt="Ausgeschnittenes Kennzeichen">
+                            <span>Kennzeichen-Ausschnitt</span>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    if (!hasLatestImages) {
+        html = '<p class="loading">Noch keine Erkennungsbilder vorhanden</p>';
+    }
+
+    container.innerHTML = html;
 }
 
 function displayOccupancyData(data, container) {
@@ -334,6 +375,10 @@ function update() {
         const mqttMonitorModal = document.getElementById('modal-mqtt-monitor');
         if (mqttMonitorModal && mqttMonitorModal.classList.contains('active')) {
             loadMqttMonitor();
+        }
+        const plateRecognitionModal = document.getElementById('modal-plate-recognition');
+        if (plateRecognitionModal && plateRecognitionModal.classList.contains('active')) {
+            loadModalData('plate-recognition');
         }
 
         // Aktive Session aktualisieren
@@ -664,6 +709,133 @@ function showRecognitionError(message) {
     resultDiv.classList.add("visible");
 }
 
+async function updateAutoRecognitionStatus() {
+    const statusElement = document.getElementById("auto-recognition-status");
+    if (!statusElement) {
+        return;
+    }
+
+    try {
+        const response = await fetch("/api/recognition/auto-status");
+        const data = await response.json();
+
+        if (!data.auto_detection_enabled) {
+            statusElement.textContent = "Automatische Erkennung pausiert";
+            statusElement.className = "auto-recognition-status is-idle";
+            return;
+        }
+
+        if (data.detected_plate && data.detected_plate.trim() !== "") {
+            statusElement.innerHTML = buildAutoRecognitionStatusHtml(data);
+            statusElement.className = getAutoRecognitionStatusClass(data);
+            updateRecognitionStats(data);
+            return;
+        }
+
+        statusElement.textContent = data.status === "not_ready"
+            ? "Erkennung noch nicht bereit"
+            : "Automatische Erkennung sucht...";
+        statusElement.className = "auto-recognition-status is-searching";
+    } catch (error) {
+        statusElement.textContent = "Automatische Erkennung nicht erreichbar";
+        statusElement.className = "auto-recognition-status is-invalid";
+        console.error("Fehler beim Laden des Auto-Erkennungsstatus:", error);
+    }
+}
+
+function getAutoRecognitionStatusClass(data) {
+    const entryRequest = data.parking_flow && data.parking_flow.entry_request;
+
+    if (entryRequest && entryRequest.approval_status === 'pending') {
+        return "auto-recognition-status is-pending";
+    }
+
+    if (entryRequest && entryRequest.approval_status === 'rejected') {
+        return "auto-recognition-status is-invalid";
+    }
+
+    return data.plate_valid === false
+                ? "auto-recognition-status is-invalid"
+                : "auto-recognition-status is-valid";
+}
+
+function buildAutoRecognitionStatusHtml(data) {
+    const entryRequest = data.parking_flow && data.parking_flow.entry_request;
+    const plate = escapeHtml(data.detected_plate || '-');
+
+    if (!entryRequest) {
+        return `
+            <div class="auto-status-main">Automatisch erkannt: ${plate}</div>
+        `;
+    }
+
+    let statusText = entryRequest.message || '';
+    if (!statusText) {
+        if (entryRequest.approval_status === 'approved') {
+            statusText = 'Genehmigt';
+        } else if (entryRequest.approval_status === 'pending') {
+            statusText = 'Muss genehmigt werden';
+        } else if (entryRequest.approval_status === 'rejected') {
+            statusText = 'Abgelehnt';
+        }
+    }
+
+    const actionHtml = entryRequest.can_decide
+        ? `
+            <div class="auto-status-actions">
+                <button type="button" class="btn-approve" onclick="approveAutoEntry(${entryRequest.request_id})">Annehmen</button>
+                <button type="button" class="btn-reject" onclick="rejectAutoEntry(${entryRequest.request_id})">Ablehnen</button>
+            </div>
+        `
+        : '';
+
+    return `
+        <div class="auto-status-main">${plate}</div>
+        <div class="auto-status-note">${escapeHtml(statusText)}</div>
+        ${actionHtml}
+    `;
+}
+
+async function approveAutoEntry(requestId) {
+    await approveEntry(requestId);
+    updateAutoRecognitionStatus();
+}
+
+async function rejectAutoEntry(requestId) {
+    await rejectEntry(requestId);
+    updateAutoRecognitionStatus();
+}
+
+function updateRecognitionStats(data) {
+    const plateElement = document.getElementById("recognized-plate");
+    if (plateElement) {
+        if (data.plate_valid === false) {
+            plateElement.innerText = `${data.detected_plate} - ungueltig`;
+            plateElement.style.color = "#ff6b6b";
+        } else if (data.plate_valid === true) {
+            plateElement.innerText = `${data.detected_plate} - gueltig`;
+            plateElement.style.color = "#51cf66";
+        } else {
+            plateElement.innerText = data.detected_plate || "-";
+            plateElement.style.color = "#ffd93d";
+        }
+    }
+
+    const yoloElement = document.getElementById("yolo-confidence");
+    const ocrElement = document.getElementById("ocr-confidence");
+    const combinedElement = document.getElementById("combined-confidence");
+
+    if (yoloElement) {
+        yoloElement.innerText = ((data.plate_confidence || 0) * 100).toFixed(1) + "%";
+    }
+    if (ocrElement) {
+        ocrElement.innerText = ((data.ocr_confidence || 0) * 100).toFixed(1) + "%";
+    }
+    if (combinedElement) {
+        combinedElement.innerText = ((data.combined_confidence || 0) * 100).toFixed(1) + "%";
+    }
+}
+
 /**
  * Zeigt Detail-Modal mit allen Ergebnissen
  */
@@ -706,6 +878,8 @@ window.addEventListener('DOMContentLoaded', function() {
     setInterval(updateTime, 1000);
     setInterval(animateMqttWaitingStatus, 600);
     setInterval(updateMqttMonitorPreview, 1000);
+    updateAutoRecognitionStatus();
+    setInterval(updateAutoRecognitionStatus, 1500);
     update();
     setInterval(update, 5000);
 });
@@ -970,8 +1144,9 @@ function displayProtocol(filter = 'all') {
                     ? 'confidence-medium'
                     : 'confidence-low';
 
-                const dauerparkerBadge = request.is_dauerparker
-                    ? '<span class="dauerparker-badge">Dauerparker</span>'
+                const protocolNote = request.message || (request.is_dauerparker ? 'Dauerparker' : '');
+                const protocolNoteDisplay = protocolNote
+                    ? `<span class="dauerparker-badge">${escapeHtml(protocolNote)}</span>`
                     : '-';
 
                 let actionBtns = '';
@@ -995,7 +1170,7 @@ function displayProtocol(filter = 'all') {
                         <td><strong>${request.license_plate}</strong></td>
                         <td><span class="${statusClass}">${statusText}</span></td>
                         <td><span class="${confidenceClass}">${request.ocr_confidence.toFixed(1)}%</span></td>
-                        <td>${dauerparkerBadge}</td>
+                        <td>${protocolNoteDisplay}</td>
                         <td>${actionBtns}</td>
                     </tr>
                 `;
@@ -1134,6 +1309,7 @@ async function rejectEntry(requestId) {
             console.log(`Entry #${requestId} abgelehnt`);
             // Aktualisiere die Protokoll-Tabelle
             displayProtocol('pending');
+            update();
         } else {
             alert(`Fehler: ${data.message}`);
         }

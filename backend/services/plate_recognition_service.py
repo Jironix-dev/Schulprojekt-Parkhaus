@@ -15,7 +15,7 @@ import base64
 # Füge AI zum Pfad hinzu
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "AI"))
 
-from AI.plate_recognizer import PlateRecognizer
+from AI.plate_recognizer import PlateRecognizer, YOLO_CONF_THRESHOLD, YOLO_IOU_THRESHOLD
 from AI.plate_detection_models import PlateDetectionResult, RecognitionStatistics
 from AI.image_processor import ImageProcessor
 from backend.database.db import db
@@ -99,6 +99,51 @@ class PlateRecognitionService:
         except Exception as e:
             logger.error(f"Fehler bei Erkennung: {e}")
             return self._error_response(str(e))
+
+    def detect_plate_presence(self, frame: np.ndarray) -> Dict[str, Any]:
+        """
+        Prueft nur per YOLO, ob ein Kennzeichen im Frame sichtbar ist.
+        Diese Methode fuehrt bewusst keine OCR aus und ist fuer die Live-Feed-Sperre gedacht.
+        """
+        if not self.is_ready():
+            return {"present": False, "error": "Service nicht verfügbar"}
+
+        try:
+            results = self._recognizer.model(  # type: ignore[union-attr]
+                frame,
+                conf=YOLO_CONF_THRESHOLD,
+                iou=YOLO_IOU_THRESHOLD,
+                verbose=False
+            )
+
+            if not results or len(results) == 0:
+                return {"present": False}
+
+            result = results[0]
+            if result.boxes is None or len(result.boxes) == 0:
+                return {"present": False}
+
+            box = result.boxes[0]
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            confidence = float(box.conf[0])
+
+            return {
+                "present": True,
+                "plate_confidence": round(confidence, 4),
+                "plate_region": {
+                    "x1": x1,
+                    "y1": y1,
+                    "x2": x2,
+                    "y2": y2,
+                    "confidence": round(confidence, 4),
+                    "width": x2 - x1,
+                    "height": y2 - y1,
+                    "area": (x2 - x1) * (y2 - y1),
+                }
+            }
+        except Exception as e:
+            logger.error(f"Fehler bei YOLO-Presence-Check: {e}")
+            return {"present": False, "error": str(e)}
 
     def _apply_ocr_correction(self, result: PlateDetectionResult) -> PlateDetectionResult:
         """

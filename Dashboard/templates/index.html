@@ -30,7 +30,8 @@
             <div class="card recognition-panel">
                 <h3>Kennzeichen-Erkennung</h3>
                 <div class="recognition-controls">
-                    <button class="btn btn-recognize" onclick="recognizePlate()">🔍 Jetzt erkennen</button>
+                    <div class="auto-recognition-status" id="auto-recognition-status">Automatische Erkennung aktiv</div>
+                    <button class="btn-recognition-images" type="button" onclick="openModal('plate-recognition')">Bilder anzeigen</button>
                 </div>
                 
                 <div id="recognition-result" class="recognition-result hidden">
@@ -447,7 +448,7 @@
                                 <th>Kennzeichen</th>
                                 <th>Status</th>
                                 <th>Konfidenz</th>
-                                <th>Dauerparker</th>
+                                <th>Hinweis</th>
                                 <th>Aktion</th>
                             </tr>
                         </thead>
