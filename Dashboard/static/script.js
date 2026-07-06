@@ -1158,7 +1158,7 @@ function displayProtocol(filter = 'all') {
                         </div>
                     `;
                 } else {
-                    actionBtns = '-';
+                    actionBtns = request.notes || '-';
                 }
 
                 html += `
