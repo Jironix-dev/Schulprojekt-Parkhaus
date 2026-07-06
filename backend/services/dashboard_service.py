@@ -14,12 +14,9 @@ class DashboardService:
         """Lokaler Zeitstempel fuer SQLite, damit Parkdauer nicht mit UTC startet."""
         return datetime.now().replace(microsecond=0).isoformat(sep=' ')
 
-    """Service für Dashboard-Datenabfragen"""
-    
     @staticmethod
-    def get_parking_capacity() -> Dict[str, Any]:
-        """Ruft aktuelle Parkplatz-Kapazität ab"""
-        cursor = db.get_cursor()
+    def _refresh_capacity(cursor) -> None:
+        """Synchronisiert die belegten Plaetze mit den aktiven Park-Sessions."""
         cursor.execute("""
             UPDATE parking_capacity
             SET occupied_spaces = (
@@ -30,29 +27,51 @@ class DashboardService:
             last_updated = datetime('now', 'localtime')
             WHERE id = 1
         """)
-        db.commit()
+
+    @staticmethod
+    def _get_capacity_state(cursor) -> Dict[str, Any]:
+        """Liest die aktuelle Kapazitaet und berechnet, ob noch Einfahrt moeglich ist."""
+        DashboardService._refresh_capacity(cursor)
         cursor.execute("""
-            SELECT total_spaces, occupied_spaces, last_updated 
-            FROM parking_capacity 
+            SELECT total_spaces, occupied_spaces, last_updated
+            FROM parking_capacity
             LIMIT 1
         """)
         result = cursor.fetchone()
-        
-        if result:
+
+        if not result:
             return {
-                'total_spaces': result[0],
-                'occupied_spaces': result[1],
-                'available_spaces': result[0] - result[1],
-                'occupancy_rate': round((result[1] / result[0] * 100) if result[0] > 0 else 0, 1),
-                'last_updated': result[2]
+                'total_spaces': 0,
+                'occupied_spaces': 0,
+                'available_spaces': 0,
+                'occupancy_rate': 0.0,
+                'last_updated': None,
+                'is_full': True,
             }
+
+        total_spaces = result[0]
+        occupied_spaces = result[1]
+        available_spaces = max(0, total_spaces - occupied_spaces)
+        occupancy_rate = round((occupied_spaces / total_spaces * 100) if total_spaces > 0 else 0, 1)
+
         return {
-            'total_spaces': 0,
-            'occupied_spaces': 0,
-            'available_spaces': 0,
-            'occupancy_rate': 0.0,
-            'last_updated': None
+            'total_spaces': total_spaces,
+            'occupied_spaces': occupied_spaces,
+            'available_spaces': available_spaces,
+            'occupancy_rate': min(100.0, occupancy_rate),
+            'last_updated': result[2],
+            'is_full': available_spaces <= 0,
         }
+
+    """Service für Dashboard-Datenabfragen"""
+    
+    @staticmethod
+    def get_parking_capacity() -> Dict[str, Any]:
+        """Ruft aktuelle Parkplatz-Kapazität ab"""
+        cursor = db.get_cursor()
+        capacity = DashboardService._get_capacity_state(cursor)
+        db.commit()
+        return capacity
     
     @staticmethod
     def get_active_session() -> Optional[Dict[str, Any]]:
@@ -586,6 +605,27 @@ class DashboardService:
             is_known_approved = vehicle_status == 'approved'
             auto_approved = is_dauerparker or is_known_approved
 
+            capacity = DashboardService._get_capacity_state(cursor)
+            if capacity['is_full']:
+                cursor.execute("""
+                    INSERT INTO entry_requests (
+                        license_plate,
+                        ocr_confidence,
+                        approval_status,
+                        is_dauerparker,
+                        approved_at,
+                        notes
+                    )
+                    VALUES (?, ?, 'rejected', ?, NULL, ?)
+                """, (
+                    license_plate,
+                    ocr_confidence,
+                    1 if is_dauerparker else 0,
+                    "Parkhaus voll - Einfahrt gesperrt"
+                ))
+                db.commit()
+                return False, "Parkhaus voll - Einfahrt gesperrt"
+
             approval_status = 'approved' if auto_approved else 'pending'
             approved_at = DashboardService._now_db() if auto_approved else None
             request_note = "Kennzeichen bekannt" if is_known_approved and not is_dauerparker else None
@@ -595,7 +635,6 @@ class DashboardService:
             if auto_approved:
                 started_session, session_message = DashboardService._start_parking_session_for_plate(
                     license_plate,
-                    is_dauerparker=is_dauerparker
                     is_dauerparker=is_dauerparker
                 )
 
@@ -701,6 +740,7 @@ class DashboardService:
                     approval_status AS status,
                     CASE
                         WHEN notes = 'Kennzeichen bekannt' THEN 'Kennzeichen bekannt'
+                        WHEN notes = 'Parkhaus voll - Einfahrt gesperrt' THEN notes
                         WHEN approval_status = 'pending' THEN 'Wartet auf Bestaetigung'
                         WHEN approval_status = 'approved' THEN 'Einfahrt genehmigt'
                         WHEN approval_status = 'rejected' THEN 'Einfahrt abgelehnt'
@@ -756,6 +796,11 @@ class DashboardService:
 
             if not request:
                 return False, "Entry Request nicht gefunden"
+
+            capacity = DashboardService._get_capacity_state(cursor)
+            if capacity['is_full']:
+                db.commit()
+                return False, "Parkhaus voll - Einfahrt gesperrt"
             
             approved_at = DashboardService._now_db()
             if request[2] == 'pending':
@@ -918,6 +963,11 @@ class DashboardService:
 
         if existing and existing[1]:
             return False, "Auto ist bereits im Parkhaus"
+
+        capacity = DashboardService._get_capacity_state(cursor)
+        if capacity['is_full']:
+            db.commit()
+            return False, "Parkhaus voll - Einfahrt gesperrt"
 
         now = DashboardService._now_db()
         vehicle_status = 'dauerparker' if is_dauerparker else 'approved'

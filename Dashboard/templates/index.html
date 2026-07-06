@@ -62,7 +62,7 @@
         <!-- Widgets (Rechts) -->
         <div class="widgets-section">
             <!-- Kapazität Anzeige -->
-            <div class="card capacity-card clickable" onclick="openModal('occupancy')">
+            <div class="card capacity-card clickable {% if data.parking_capacity.is_full %}capacity-full{% endif %}" onclick="openModal('occupancy')">
                 <h3>Parkplatz-Auslastung</h3>
                 <div class="capacity-grid">
                     <div class="capacity-stat">
@@ -74,7 +74,7 @@
                         <div class="stat-label">Besetzt</div>
                     </div>
                     <div class="capacity-stat">
-                        <div class="stat-value available" id="available-spaces">{{ data.parking_capacity.available_spaces }}</div>
+                        <div class="stat-value available {% if data.parking_capacity.is_full %}full{% endif %}" id="available-spaces">{{ data.parking_capacity.available_spaces }}</div>
                         <div class="stat-label">Frei</div>
                     </div>
                     <div class="capacity-stat">
@@ -82,6 +82,13 @@
                         <div class="stat-label">Auslastung</div>
                     </div>
                 </div>
+                <p class="capacity-status" id="capacity-status">
+                    {% if data.parking_capacity.is_full %}
+                    Parkhaus voll - Einfahrt gesperrt
+                    {% else %}
+                    Einfahrt frei
+                    {% endif %}
+                </p>
                 <p class="preview-text capacity-preview">Autos im Parkhaus anzeigen →</p>
             </div>
 

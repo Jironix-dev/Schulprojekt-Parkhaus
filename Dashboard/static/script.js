@@ -356,6 +356,20 @@ function update() {
         document.getElementById("occupied-spaces").innerText = data.parking_capacity.occupied_spaces;
         document.getElementById("available-spaces").innerText = data.parking_capacity.available_spaces;
         document.getElementById("occupancy-rate").innerText = data.parking_capacity.occupancy_rate + "%";
+        const capacityCard = document.querySelector('.capacity-card');
+        const capacityStatus = document.getElementById('capacity-status');
+        const availableSpaces = document.getElementById('available-spaces');
+        if (capacityCard) {
+            capacityCard.classList.toggle('capacity-full', Boolean(data.parking_capacity.is_full));
+        }
+        if (capacityStatus) {
+            capacityStatus.innerText = data.parking_capacity.is_full
+                ? 'Parkhaus voll - Einfahrt gesperrt'
+                : 'Einfahrt frei';
+        }
+        if (availableSpaces) {
+            availableSpaces.classList.toggle('full', Boolean(data.parking_capacity.is_full));
+        }
         const pendingCountPreview = document.getElementById('pending-count-preview');
         const pendingTotalPreview = document.getElementById('pending-total-preview');
         if (pendingCountPreview && pendingTotalPreview) {

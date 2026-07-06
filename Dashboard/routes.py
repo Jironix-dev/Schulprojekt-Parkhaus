@@ -133,7 +133,7 @@ def build_entry_request_status(license_plate: str) -> dict | None:
     elif approval_status == "approved":
         display_message = entry_request["message"] or "Kennzeichen bekannt"
     elif approval_status == "rejected":
-        display_message = "Einfahrt abgelehnt"
+        display_message = entry_request["message"] or "Einfahrt abgelehnt"
     else:
         display_message = entry_request["message"] or approval_status
 
@@ -753,7 +753,7 @@ def approve_entry(request_id: int):
         
         logs.append({
             "time": time.strftime("%H:%M:%S"),
-            "event": f"Entry #{request_id} genehmigt"
+            "event": f"Entry #{request_id}: {message}"
         })
 
         if (

@@ -198,6 +198,21 @@ h3 {
     text-align: center;
 }
 
+.capacity-status {
+    margin: 15px 0 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #dcfce7;
+    color: #166534;
+    font-weight: bold;
+    text-align: center;
+}
+
+.capacity-card.capacity-full .capacity-status {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
 .occupancy-overview {
     display: grid;
     grid-template-columns: 180px 1fr;
@@ -290,6 +305,10 @@ h3 {
 
 .stat-value.available {
     color: #16a34a;
+}
+
+.stat-value.available.full {
+    color: #dc2626;
 }
 
 .stat-value.rate {
