@@ -895,7 +895,7 @@ window.addEventListener('DOMContentLoaded', function() {
     updateAutoRecognitionStatus();
     setInterval(updateAutoRecognitionStatus, 1500);
     update();
-    setInterval(update, 5000);
+    setInterval(update, 3000);
 });
 
 // ==================== PLATE INPUT VALIDATION & ADD VEHICLE ====================
@@ -1305,10 +1305,6 @@ async function approveEntry(requestId) {
 }
 
 async function rejectEntry(requestId) {
-    if (!confirm('Bist du sicher, dass du diese Anfrage ablehnen möchtest?')) {
-        return;
-    }
-
     try {
         const response = await fetch(`/api/entry/reject/${requestId}`, {
             method: 'POST',

@@ -103,11 +103,12 @@ class ParkingQueries:
     def create_session(vehicle_id: int, entry_image_id: Optional[int] = None) -> Optional[int]:
         """Erstellt neue Parkplatz-Session"""
         cursor = db.get_cursor()
+        now = datetime.now()
         cursor.execute(
             """INSERT INTO parking_sessions 
-               (vehicle_id, entry_time, entry_image_id, status)
-               VALUES (?, ?, ?, ?)""",
-            (vehicle_id, datetime.now(), entry_image_id, 'parked')
+               (vehicle_id, entry_time, billing_started_at, entry_image_id, status)
+               VALUES (?, ?, ?, ?, ?)""",
+            (vehicle_id, now, now, entry_image_id, 'parked')
         )
         db.commit()
         return cursor.lastrowid

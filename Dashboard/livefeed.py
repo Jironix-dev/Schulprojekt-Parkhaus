@@ -35,6 +35,7 @@ AUTO_PRESENCE_CHECK_INTERVAL = 0.75
 AUTO_ABSENCE_CONFIRMATIONS = 2
 AUTO_BOX_TTL = 2.5
 AUTO_PLATE_COOLDOWN = 20.0
+AUTO_INVALID_RETRY_INTERVAL = 5.0
 
 
 class LiveFeedHandler:
@@ -313,6 +314,10 @@ class LiveFeedHandler:
             if presence.get("present"):
                 self.plate_absence_count = 0
                 self._update_box_from_result(presence)
+                if self._should_retry_invalid_plate():
+                    self.last_auto_detection_time = time.time()
+                    self._run_auto_detection(frame)
+                    return
                 with self.frame_lock:
                     self.last_auto_result["status"] = "occupied"
                     self.last_auto_result["plate_confidence"] = presence.get(
@@ -417,6 +422,17 @@ class LiveFeedHandler:
         return (
             detected_plate != self.last_processed_plate
             or now - self.last_processed_plate_time >= AUTO_PLATE_COOLDOWN
+        )
+
+    def _should_retry_invalid_plate(self) -> bool:
+        """Erlaubt nach kurzer Wartezeit einen neuen OCR-Versuch bei ungueltiger Erkennung."""
+        with self.frame_lock:
+            result = dict(self.last_auto_result)
+
+        return (
+            result.get("plate_valid") is False
+            and bool(result.get("detected_plate"))
+            and time.time() - self.last_auto_detection_time >= AUTO_INVALID_RETRY_INTERVAL
         )
 
     def _draw_latest_plate_box(self, frame: np.ndarray) -> np.ndarray:

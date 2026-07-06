@@ -193,6 +193,28 @@ python3 -c "import sqlite3; db=sqlite3.connect('data/parkhaus.db'); print(db.exe
 
 Hinweis: Die Kapazität sollte nicht kleiner als die aktuell belegten Plätze gesetzt werden. Das System verhindert zwar weitere Einfahrten, aber eine realistische Anzeige ist sauberer.
 
+### Fahrzeugdaten leeren
+
+Wenn alle bekannten Kennzeichen, Dauerparker, aktiven Parkvorgänge und Ein-/Ausfahrtsanfragen gelöscht werden sollen, kann die Datenbank zurückgesetzt werden.
+
+Vorher sollte das Dashboard beendet werden, damit währenddessen keine neuen Einträge geschrieben werden.
+
+```bash
+python3 -c "import sqlite3; db=sqlite3.connect('data/parkhaus.db'); db.executescript(\"DELETE FROM exit_requests; DELETE FROM entry_requests; DELETE FROM parking_sessions; DELETE FROM vehicles; UPDATE parking_capacity SET occupied_spaces = 0, last_updated = datetime('now', 'localtime') WHERE id = 1;\"); db.commit(); db.close()"
+```
+
+Prüfen:
+
+```bash
+python3 -c "import sqlite3; db=sqlite3.connect('data/parkhaus.db'); print('vehicles:', db.execute('SELECT COUNT(*) FROM vehicles').fetchone()[0]); print('sessions:', db.execute('SELECT COUNT(*) FROM parking_sessions').fetchone()[0]); print('entry_requests:', db.execute('SELECT COUNT(*) FROM entry_requests').fetchone()[0]); print('exit_requests:', db.execute('SELECT COUNT(*) FROM exit_requests').fetchone()[0]); print('capacity:', db.execute('SELECT total_spaces, occupied_spaces FROM parking_capacity WHERE id = 1').fetchone()); db.close()"
+```
+
+Wenn zusätzlich auch die gespeicherten Erkennungsbilder und OCR-Protokolle gelöscht werden sollen:
+
+```bash
+python3 -c "import sqlite3; db=sqlite3.connect('data/parkhaus.db'); db.executescript(\"DELETE FROM plate_detections; DELETE FROM images;\"); db.commit(); db.close()"
+```
+
 ## 7. Einfahrtslogik
 
 Die Einfahrt wird in `Dashboard/routes.py` und `backend/services/dashboard_service.py` verarbeitet.
@@ -234,6 +256,19 @@ Grundidee:
 5. Wenn die Ausfahrt erlaubt ist, wird die Session beendet.
 6. Die belegten Plätze werden aktualisiert.
 7. MQTT startet die Ausfahrtssequenz für Ampel und Schranke.
+
+### Ausfahrtsfenster nach Zahlung
+
+Nach einer bestätigten Zahlung hat ein normales Fahrzeug 3 Minuten Zeit, um auszufahren.
+
+Wenn diese 3 Minuten ablaufen, ohne dass die Ausfahrt abgeschlossen wurde:
+
+- wird die Zahlung automatisch wieder zurückgesetzt,
+- das Fahrzeug erscheint wieder bei den offenen Zahlungen,
+- der neue Gebührenzeitraum beginnt ab dem Ablauf des Ausfahrtsfensters,
+- die erneute Berechnung startet dadurch wieder frisch ab diesem Zeitpunkt.
+
+Die automatische Prüfung läuft beim Abrufen der Dashboarddaten. Dadurch muss das Kennzeichen nicht erst erneut an der Schranke erkannt werden, damit das Fahrzeug wieder zahlungspflichtig wird.
 
 ## 9. Dauerparker
 
@@ -278,6 +313,8 @@ backend/database/validators.py
 
 Ungültige Kennzeichen werden nicht zur Einfahrt freigegeben.
 
+Bei der automatischen Live-Erkennung muss ein ungültig gelesenes Kennzeichen nicht erst aus dem Bild genommen werden. Solange es sichtbar bleibt, startet das System nach 5 Sekunden automatisch einen neuen Erkennungsversuch.
+
 ## 11. Kostenberechnung
 
 Die Gebühren werden in `backend/services/payment.py` berechnet.
@@ -292,6 +329,10 @@ Tarif:
 | jede weiteren 30 Sekunden | +1,50 EUR |
 
 Die Berechnung arbeitet in Sekunden. Das ist praktisch für Tests, weil man nicht minutenlang warten muss.
+
+Für die normale Parkdauer wird weiterhin die Einfahrtszeit verwendet. Für die Gebührenberechnung gibt es zusätzlich den Gebührenstart `billing_started_at`.
+
+Normalerweise entspricht `billing_started_at` der Einfahrtszeit. Wenn ein bezahltes Fahrzeug das 3-Minuten-Ausfahrtsfenster verpasst, wird `billing_started_at` auf den Ablaufzeitpunkt dieses Fensters gesetzt. Die nächste Zahlung berechnet dann nur die Zeit seit diesem neuen Gebührenstart.
 
 Beispiele:
 
@@ -311,6 +352,8 @@ data/parkhaus.db
 ```
 
 Die Tabellen werden in `backend/database/models.py` definiert.
+
+Bestehende Datenbanken werden beim Start über `backend/database/db.py` einfach migriert. Fehlt zum Beispiel `billing_started_at` in `parking_sessions`, wird die Spalte automatisch ergänzt.
 
 ### Wichtige Tabellen
 
@@ -341,6 +384,7 @@ Die Tabellen werden in `backend/database/models.py` definiert.
 |---|---|
 | `vehicle_id` | Fahrzeug |
 | `entry_time` | Einfahrtszeit |
+| `billing_started_at` | Startzeitpunkt für die aktuelle Gebührenberechnung |
 | `exit_time` | Ausfahrtszeit, `NULL` bedeutet aktiv |
 | `status` | Sessionstatus |
 | `cost_calculated` | berechnete Kosten |
@@ -381,6 +425,7 @@ Das Dashboard kann:
 - Bilder hochladen und auswerten
 - Fahrzeugbild, Kennzeichen-Ausschnitt und Bounding Box anzeigen
 - Konfidenzwerte anzeigen
+- ungültige Live-Erkennungen nach 5 Sekunden automatisch erneut prüfen, solange das Kennzeichen sichtbar bleibt
 
 ## 14. MQTT und ESP32
 
@@ -493,14 +538,16 @@ Die wichtigsten API-Endpunkte aus `Dashboard/routes.py`:
 2. Kennzeichen wird erkannt.
 3. System berechnet die Kosten.
 4. Benutzer bestätigt die Zahlung im Dashboard.
-5. Danach wird die Ausfahrt freigegeben.
+5. Danach wird die Ausfahrt für 3 Minuten freigegeben.
+6. Fährt das Fahrzeug in dieser Zeit aus, wird die Session beendet.
+7. Läuft die Zeit ab, wird die Zahlung automatisch zurückgesetzt und der neue Gebührenzeitraum startet ab dem Ablaufzeitpunkt.
 
 ## 17. Wartung und nützliche Befehle
 
 ### Syntax prüfen
 
 ```bash
-python3 -m py_compile Dashboard/app.py Dashboard/routes.py backend/services/dashboard_service.py backend/services/exit_service.py
+python3 -m py_compile Dashboard/app.py Dashboard/routes.py Dashboard/livefeed.py backend/services/dashboard_service.py backend/services/exit_service.py backend/services/payment.py
 ```
 
 ### Datenbankwert anzeigen
@@ -512,7 +559,7 @@ python3 -c "import sqlite3; db=sqlite3.connect('data/parkhaus.db'); print(db.exe
 ### Aktive Sessions anzeigen
 
 ```bash
-python3 -c "import sqlite3; db=sqlite3.connect('data/parkhaus.db'); print(db.execute('SELECT id, vehicle_id, entry_time, exit_time, status FROM parking_sessions WHERE exit_time IS NULL').fetchall()); db.close()"
+python3 -c "import sqlite3; db=sqlite3.connect('data/parkhaus.db'); print(db.execute('SELECT id, vehicle_id, entry_time, billing_started_at, exit_time, status, payment_confirmed FROM parking_sessions WHERE exit_time IS NULL').fetchall()); db.close()"
 ```
 
 ### Dashboard starten

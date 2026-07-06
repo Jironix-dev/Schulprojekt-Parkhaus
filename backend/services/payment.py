@@ -51,7 +51,7 @@ class DatabasePaymentCalculator:
             
             cursor = db_connection.get_cursor()
             cursor.execute(
-                "SELECT entry_time, exit_time FROM parking_sessions WHERE id = ?",
+                "SELECT COALESCE(billing_started_at, entry_time), exit_time FROM parking_sessions WHERE id = ?",
                 (session_id,)
             )
             result = cursor.fetchone()
@@ -59,12 +59,12 @@ class DatabasePaymentCalculator:
             if not result:
                 return None
             
-            entry_time_str, exit_time_str = result
+            billing_start_str, exit_time_str = result
             
             if not exit_time_str:
                 return None
             
-            entry_time = datetime.fromisoformat(entry_time_str)
+            entry_time = datetime.fromisoformat(billing_start_str)
             exit_time = datetime.fromisoformat(exit_time_str)
             parking_seconds = int((exit_time - entry_time).total_seconds())
             
@@ -114,7 +114,11 @@ class DatabasePaymentCalculator:
             
             cursor = db_connection.get_cursor()
             cursor.execute(
-                "SELECT entry_time, exit_time, cost_calculated FROM parking_sessions WHERE id = ?",
+                """
+                SELECT entry_time, COALESCE(billing_started_at, entry_time), exit_time, cost_calculated
+                FROM parking_sessions
+                WHERE id = ?
+                """,
                 (session_id,)
             )
             result = cursor.fetchone()
@@ -122,20 +126,22 @@ class DatabasePaymentCalculator:
             if not result:
                 return {'error': f'Session {session_id} nicht gefunden'}
             
-            entry_time_str, exit_time_str, stored_cost = result
+            entry_time_str, billing_start_str, exit_time_str, stored_cost = result
             entry_time = datetime.fromisoformat(entry_time_str) if entry_time_str else None
+            billing_start = datetime.fromisoformat(billing_start_str) if billing_start_str else entry_time
             exit_time = datetime.fromisoformat(exit_time_str) if exit_time_str else None
             
             info = {
                 'session_id': session_id,
                 'entry_time': entry_time,
+                'billing_started_at': billing_start,
                 'exit_time': exit_time,
                 'is_active': exit_time is None,
                 'stored_cost': stored_cost
             }
             
-            if entry_time and exit_time:
-                duration = exit_time - entry_time
+            if billing_start and exit_time:
+                duration = exit_time - billing_start
                 seconds = int(duration.total_seconds())
                 calculated_cost = PaymentCalculator.calculate_from_seconds(seconds)
                 info['calculated_cost'] = calculated_cost

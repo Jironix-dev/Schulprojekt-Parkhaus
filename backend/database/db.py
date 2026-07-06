@@ -48,6 +48,8 @@ class Database:
             for table_name, create_sql in SCHEMA.items():
                 cursor.execute(create_sql)
                 print(f"[OK] Tabelle '{table_name}' initialisiert")
+
+            self._run_migrations(cursor)
             
             # Kapazität initialisieren, falls leer
             cursor.execute("SELECT COUNT(*) FROM parking_capacity")
@@ -64,6 +66,15 @@ class Database:
             print(f"[FEHLER] Fehler beim Initialisieren: {e}")
             self.connection.rollback()
             raise
+
+    def _run_migrations(self, cursor):
+        """Ergaenzt fehlende Spalten in bestehenden SQLite-Datenbanken."""
+        cursor.execute("PRAGMA table_info(parking_sessions)")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        if 'billing_started_at' not in columns:
+            cursor.execute("ALTER TABLE parking_sessions ADD COLUMN billing_started_at TIMESTAMP")
+            print("[OK] Migration: parking_sessions.billing_started_at hinzugefuegt")
             
     def get_cursor(self):
         """Gibt einen Datenbank-Cursor zurück"""

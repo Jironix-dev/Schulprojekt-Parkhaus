@@ -23,6 +23,7 @@ SCHEMA = {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             vehicle_id INTEGER NOT NULL,
             entry_time TIMESTAMP NOT NULL,
+            billing_started_at TIMESTAMP,
             exit_time TIMESTAMP,
             entry_image_id INTEGER,
             exit_image_id INTEGER,

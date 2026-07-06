@@ -15,6 +15,19 @@ class DashboardService:
         return datetime.now().replace(microsecond=0).isoformat(sep=' ')
 
     @staticmethod
+    def _parse_db_time(value):
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value))
+
+    @staticmethod
+    def _expire_overdue_exit_windows() -> None:
+        from backend.services.exit_service import ExitService
+        ExitService.expire_overdue_exit_windows()
+
+    @staticmethod
     def _refresh_capacity(cursor) -> None:
         """Synchronisiert die belegten Plaetze mit den aktiven Park-Sessions."""
         cursor.execute("""
@@ -76,6 +89,7 @@ class DashboardService:
     @staticmethod
     def get_active_session() -> Optional[Dict[str, Any]]:
         """Ruft aktuelle aktive Parkplatz-Session ab (Fahrzeug mit Exit-Zeit = NULL)"""
+        DashboardService._expire_overdue_exit_windows()
         cursor = db.get_cursor()
         cursor.execute("""
             SELECT 
@@ -206,6 +220,7 @@ class DashboardService:
     @staticmethod
     def get_all_parked_vehicles() -> list:
         """Ruft alle aktuell parkenden Fahrzeuge mit vollständigen Daten ab"""
+        DashboardService._expire_overdue_exit_windows()
         cursor = db.get_cursor()
         cursor.execute("""
             SELECT 
@@ -214,6 +229,7 @@ class DashboardService:
                 v.license_plate,
                 v.status as vehicle_status,
                 ps.entry_time,
+                ps.billing_started_at,
                 ps.exit_time,
                 ps.status as session_status,
                 ps.parking_duration_minutes,
@@ -241,14 +257,15 @@ class DashboardService:
                 'license_plate': row[2],
                 'vehicle_status': row[3],
                 'entry_time': row[4],
-                'session_status': row[6],
+                'billing_started_at': row[5],
+                'session_status': row[7],
                 'parking_duration_minutes': round(duration, 1),
                 'parking_duration_formatted': f"{int(duration)} Min {int((duration % 1) * 60)} Sek",
-                'cost_calculated': row[8],
-                'cost_paid': row[9],
-                'payment_confirmed': bool(row[10]),
-                'confidence_score': row[11],
-                'total_sessions': row[12],
+                'cost_calculated': row[9],
+                'cost_paid': row[10],
+                'payment_confirmed': bool(row[11]),
+                'confidence_score': row[12],
+                'total_sessions': row[13],
                 'is_dauerparker': row[3] == 'dauerparker'
             })
         
@@ -274,8 +291,10 @@ class DashboardService:
             if v['is_dauerparker'] or v['payment_confirmed']:
                 continue
 
-            entry_time = datetime.fromisoformat(v['entry_time']) if isinstance(v['entry_time'], str) else v['entry_time']
-            parking_seconds = max(0, int((datetime.now() - entry_time).total_seconds()))
+            billing_start = DashboardService._parse_db_time(v.get('billing_started_at'))
+            entry_time = DashboardService._parse_db_time(v['entry_time'])
+            cost_start = billing_start or entry_time or datetime.now()
+            parking_seconds = max(0, int((datetime.now() - cost_start).total_seconds()))
             current_cost = PaymentCalculator.calculate_from_seconds(parking_seconds)
 
             cost_details.append({
@@ -886,10 +905,12 @@ class DashboardService:
     def confirm_session_payment(session_id: int) -> Tuple[bool, str, Optional[float]]:
         """Bestaetigt die Zahlung und oeffnet das Ausfahrtsfenster."""
         try:
+            DashboardService._expire_overdue_exit_windows()
             cursor = db.get_cursor()
             cursor.execute("""
                 SELECT
                     ps.entry_time,
+                    ps.billing_started_at,
                     ps.exit_time,
                     ps.payment_confirmed,
                     ps.payment_confirmed_at,
@@ -903,21 +924,22 @@ class DashboardService:
 
             if not row:
                 return False, "Park-Session nicht gefunden", None
-            if row[4] == 'dauerparker':
+            if row[5] == 'dauerparker':
                 return False, "Dauerparker muessen keine Parkgebuehr bezahlen", None
-            if row[1] is not None:
+            if row[2] is not None:
                 return False, "Park-Session ist bereits beendet", None
 
-            entry_time = datetime.fromisoformat(row[0]) if isinstance(row[0], str) else row[0]
+            entry_time = DashboardService._parse_db_time(row[0])
+            billing_start = DashboardService._parse_db_time(row[1]) or entry_time
             payment_time = datetime.now()
-            previous_payment_time = datetime.fromisoformat(row[3]) if isinstance(row[3], str) else row[3]
+            previous_payment_time = DashboardService._parse_db_time(row[4])
 
-            if row[2] and previous_payment_time:
+            if row[3] and previous_payment_time:
                 deadline = previous_payment_time + timedelta(minutes=3)
                 if payment_time <= deadline:
                     return False, "Parkgebuehr wurde bereits bezahlt. Ausfahrtsfenster ist noch offen", None
 
-            parking_seconds = int((payment_time - entry_time).total_seconds())
+            parking_seconds = int((payment_time - billing_start).total_seconds()) if billing_start else 0
             parking_minutes = max(0, int(parking_seconds / 60))
             cost = PaymentCalculator.calculate_from_seconds(parking_seconds)
 
@@ -939,7 +961,7 @@ class DashboardService:
             ))
 
             db.commit()
-            return True, f"Zahlung fuer {row[5]} bestaetigt. Ausfahrt innerhalb von 3 Minuten moeglich", cost
+            return True, f"Zahlung fuer {row[6]} bestaetigt. Ausfahrt innerhalb von 3 Minuten moeglich", cost
 
         except Exception as e:
             return False, f"Fehler: {str(e)}", None
@@ -1002,9 +1024,9 @@ class DashboardService:
             vehicle_id = cursor.lastrowid
 
         cursor.execute("""
-            INSERT INTO parking_sessions (vehicle_id, entry_time, status)
-            VALUES (?, ?, 'parked')
-        """, (vehicle_id, now))
+            INSERT INTO parking_sessions (vehicle_id, entry_time, billing_started_at, status)
+            VALUES (?, ?, ?, 'parked')
+        """, (vehicle_id, now, now))
 
         cursor.execute("""
             UPDATE parking_capacity

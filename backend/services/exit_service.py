@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from backend.database.db import db
 from backend.database.validators import PlateValidator
+from backend.services.payment import PaymentCalculator
 
 
 class ExitService:
@@ -40,6 +41,7 @@ class ExitService:
                 ps.id,
                 v.license_plate,
                 ps.entry_time,
+                ps.billing_started_at,
                 ps.payment_confirmed,
                 ps.payment_confirmed_at,
                 ps.status,
@@ -60,10 +62,11 @@ class ExitService:
             'session_id': row[0],
             'license_plate': row[1],
             'entry_time': row[2],
-            'payment_confirmed': bool(row[3]),
-            'payment_confirmed_at': row[4],
-            'session_status': row[5],
-            'vehicle_status': row[6],
+            'billing_started_at': row[3],
+            'payment_confirmed': bool(row[4]),
+            'payment_confirmed_at': row[5],
+            'session_status': row[6],
+            'vehicle_status': row[7],
         }
 
     @staticmethod
@@ -114,18 +117,19 @@ class ExitService:
             return False, "Parkgebuehr noch nicht bezahlt", log_data
 
         if now > deadline:
+            ExitService._reset_expired_payment(session, now)
             log_data = ExitService._log_exit_attempt(
                 normalized_plate,
                 session['session_id'],
                 'expired',
-                "Ausfahrtszeit nach Zahlung abgelaufen",
-                True,
+                "Ausfahrtszeit nach Zahlung abgelaufen - bitte erneut bezahlen",
+                False,
                 payment_time,
                 deadline,
                 None,
                 now,
             )
-            return False, "Ausfahrtszeit nach Zahlung abgelaufen", log_data
+            return False, "Ausfahrtszeit nach Zahlung abgelaufen - bitte erneut bezahlen", log_data
 
         return ExitService._complete_exit(
             session,
@@ -134,6 +138,88 @@ class ExitService:
             now,
             deadline,
         )
+
+    @staticmethod
+    def expire_overdue_exit_windows(now: Optional[datetime] = None) -> int:
+        """Setzt bezahlte Sessions nach Ablauf des Ausfahrtsfensters automatisch zurueck."""
+        now = now or datetime.now().replace(microsecond=0)
+        cursor = db.get_cursor()
+        cursor.execute("""
+            SELECT
+                ps.id,
+                v.license_plate,
+                ps.entry_time,
+                ps.billing_started_at,
+                ps.payment_confirmed,
+                ps.payment_confirmed_at,
+                ps.status,
+                v.status
+            FROM parking_sessions ps
+            JOIN vehicles v ON ps.vehicle_id = v.id
+            WHERE ps.exit_time IS NULL
+              AND ps.payment_confirmed = 1
+              AND ps.payment_confirmed_at IS NOT NULL
+              AND v.status != 'dauerparker'
+        """)
+
+        expired_count = 0
+        for row in cursor.fetchall():
+            payment_time = ExitService._parse_db_time(row[5])
+            if not payment_time:
+                continue
+
+            deadline = payment_time + timedelta(minutes=ExitService.EXIT_WINDOW_MINUTES)
+            if now <= deadline:
+                continue
+
+            ExitService._reset_expired_payment({
+                'session_id': row[0],
+                'license_plate': row[1],
+                'entry_time': row[2],
+                'billing_started_at': row[3],
+                'payment_confirmed': bool(row[4]),
+                'payment_confirmed_at': row[5],
+                'session_status': row[6],
+                'vehicle_status': row[7],
+            }, now, billing_start=deadline)
+            expired_count += 1
+
+        return expired_count
+
+    @staticmethod
+    def _reset_expired_payment(
+        session: Dict[str, Any],
+        now: datetime,
+        billing_start: Optional[datetime] = None,
+    ) -> None:
+        """Macht eine abgelaufene Zahlung wieder zahlungspflichtig."""
+        payment_time = ExitService._parse_db_time(session['payment_confirmed_at'])
+        if billing_start is None and payment_time:
+            billing_start = payment_time + timedelta(minutes=ExitService.EXIT_WINDOW_MINUTES)
+        billing_start = billing_start or now
+
+        parking_seconds = max(0, int((now - billing_start).total_seconds()))
+        parking_minutes = int(parking_seconds / 60)
+        current_cost = PaymentCalculator.calculate_from_seconds(parking_seconds)
+
+        cursor = db.get_cursor()
+        cursor.execute("""
+            UPDATE parking_sessions
+            SET status = 'parked',
+                billing_started_at = ?,
+                parking_duration_minutes = ?,
+                cost_calculated = ?,
+                cost_paid = 0,
+                payment_confirmed = 0,
+                payment_confirmed_at = NULL
+            WHERE id = ?
+        """, (
+            billing_start,
+            parking_minutes,
+            current_cost,
+            session['session_id'],
+        ))
+        db.commit()
 
     @staticmethod
     def get_exit_protocol(limit: int = 100) -> list:
